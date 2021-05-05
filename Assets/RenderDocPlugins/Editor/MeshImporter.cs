@@ -25,6 +25,9 @@ namespace RenderDocPlugins
         [SerializeField]
         private bool m_AutoCalcTangentIfNotExist;
 
+        [SerializeField]
+        private bool m_FlipUV_Y;
+
 
         [MenuItem("RenderDocPlugins/Import Mesh From CSV")]
         public static void DoImportMeshFromCSV()
@@ -112,6 +115,7 @@ namespace RenderDocPlugins
 
             m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft("Auto cal normal if not exist", m_AutoCalcNormalIfNotExist);
             m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft("Auto cal normal if not exist", m_AutoCalcTangentIfNotExist);
+            m_FlipUV_Y = EditorGUILayout.ToggleLeft("Flip UV Y aixa", m_FlipUV_Y);
 
             GUILayout.FlexibleSpace();
 
@@ -206,6 +210,10 @@ namespace RenderDocPlugins
             if (m_AutoCalcTangentIfNotExist)
             {
                 flags |= CSVToMeshGenerator.Flags.AutoCalcTangentIfNotExist;
+            }
+            if (m_FlipUV_Y)
+            {
+                flags |= CSVToMeshGenerator.Flags.FlipUV_Y;
             }
             CSVToMeshGenerator.GenerateMesh(m_SourcePath, m_DestPath, flags, Allocator.Temp);
         }
