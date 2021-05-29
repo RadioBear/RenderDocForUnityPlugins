@@ -1,8 +1,12 @@
 {
     "name": "RenderDocPlugins-Editor",
     "rootNamespace": "",
-    "references": [],
-    "includePlatforms": [],
+    "references": [
+        "GUID:1fe55a6ff6adae04f8c609105b575440"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": true,
     "overrideReferences": false,

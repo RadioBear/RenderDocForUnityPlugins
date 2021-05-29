@@ -10,24 +10,35 @@ namespace RenderDocPlugins
 {
     public class MeshImporter : EditorWindow
     {
+        private const int k_MinSubMeshCount = 1;
+        private const int k_MaxSubMeshCount = 8;
+
         private const int k_WindowWidth = 500;
         private const int k_WindowHeight = 400;
 
         [SerializeField]
-        private string m_SourcePath;
+        private Vector2 m_ScrollPos;
 
         [SerializeField]
-        private string m_DestPath;
+        private int m_SubMeshCount = k_MinSubMeshCount;
 
         [SerializeField]
-        private bool m_AutoCalcNormalIfNotExist;
+        private string[] m_SourcePath;
 
         [SerializeField]
-        private bool m_AutoCalcTangentIfNotExist;
+        private string m_DestPath = string.Empty;
 
         [SerializeField]
-        private bool m_FlipUV_Y;
+        private bool m_AutoCalcNormalIfNotExist = false;
 
+        [SerializeField]
+        private bool m_AutoCalcTangentIfNotExist = false;
+
+        [SerializeField]
+        private bool m_OptimizesRendering = true;
+
+        [SerializeField]
+        private ModelImporterMeshCompression m_MeshCompression = ModelImporterMeshCompression.Off;
 
         [MenuItem("RenderDocPlugins/Import Mesh From CSV")]
         public static void DoImportMeshFromCSV()
@@ -43,47 +54,75 @@ namespace RenderDocPlugins
         {
             titleContent = new GUIContent("Mesh Importer");
             minSize = new Vector2(k_WindowWidth, k_WindowHeight);
+            if (m_SourcePath == null || m_SourcePath.Length != k_MaxSubMeshCount)
+            {
+                m_SourcePath = new string[k_MaxSubMeshCount];
+            }
         }
 
 
         private void OnGUI()
         {
+            m_ScrollPos = EditorGUILayout.BeginScrollView(m_ScrollPos);
+
             GUILayout.Space(10f);
 
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                GUILayout.FlexibleSpace();
                 EditorGUILayout.BeginHorizontal();
                 {
-                    GUILayout.Label("Source CSV", GUILayout.ExpandWidth(false));
-                    GUILayout.Space(10f);
-                    if (string.IsNullOrEmpty(m_SourcePath))
+                    GUILayout.Label("Sub mesh count", GUILayout.ExpandWidth(false));
+                    var count = EditorGUILayout.IntSlider(m_SubMeshCount, k_MinSubMeshCount, k_MaxSubMeshCount);
+                    if (count != m_SubMeshCount)
                     {
-                        GUILayout.FlexibleSpace();
-                        GUILayout.Label("not select source csv file. Or you can drop csv file to here.");
-                        GUILayout.FlexibleSpace();
-                    }
-                    else
-                    {
-                        GUILayout.Label(m_SourcePath);
-                    }
-                    GUILayout.Space(10f);
-
-
-                    if (GUILayout.Button("Select File...", GUILayout.ExpandWidth(false)))
-                    {
-                        string fileSelected = EditorUtility.OpenFilePanelWithFilters("Select source csv file", Application.dataPath, new string[] { "csv files", "csv", "All files", "*" });
-                        if (!string.IsNullOrEmpty(fileSelected))
-                        {
-                            DoChangeSourceCSV(fileSelected);
-                        }
+                        m_SubMeshCount = count;
+                        TrimSourcePathFromSubMeshCount();
                     }
                 }
                 EditorGUILayout.EndHorizontal();
-                GUILayout.FlexibleSpace();
+
+                GUILayout.Space(10f);
+
+                for (int subMeshIndex = 0; subMeshIndex < m_SubMeshCount; ++subMeshIndex)
+                {
+                    if (subMeshIndex != 0)
+                    {
+                        GUILayout.Space(5f);
+                    }
+                    EditorGUILayout.BeginHorizontal();
+                    {
+                        GUILayout.Label($"SubMesh #{subMeshIndex + 1} CSV", GUILayout.ExpandWidth(false));
+                        GUILayout.Space(10f);
+                        if (string.IsNullOrEmpty(m_SourcePath[subMeshIndex]))
+                        {
+                            GUILayout.FlexibleSpace();
+                            GUILayout.Label("not select source csv file. Or you can drop csv file to here.", GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
+                            GUILayout.FlexibleSpace();
+                        }
+                        else
+                        {
+                            GUILayout.Label(m_SourcePath[subMeshIndex], GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
+                        }
+                        GUILayout.Space(10f);
+
+                        GUILayout.FlexibleSpace();
+
+                        if (GUILayout.Button("Select File...", GUILayout.ExpandWidth(false)))
+                        {
+                            string fileSelected = EditorUtility.OpenFilePanelWithFilters("Select source csv file", string.IsNullOrEmpty(m_SourcePath[subMeshIndex]) ? Application.dataPath : m_SourcePath[subMeshIndex], new string[] { "csv files", "csv", "All files", "*" });
+                            if (!string.IsNullOrEmpty(fileSelected))
+                            {
+                                DoChangeSourceCSV(subMeshIndex, fileSelected);
+                            }
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+
+                    HandleDragAndDropGUI(GUILayoutUtility.GetLastRect(), subMeshIndex);
+
+                }
             }
             EditorGUILayout.EndVertical();
-            HandleDragAndDropGUI(GUILayoutUtility.GetLastRect());
 
 
             GUILayout.Space(10f);
@@ -95,9 +134,8 @@ namespace RenderDocPlugins
                 {
                     GUILayout.Label("Destination Mesh", GUILayout.ExpandWidth(false));
                     GUILayout.Space(10f);
-                    GUILayout.TextField(m_DestPath);
+                    m_DestPath = GUILayout.TextField(m_DestPath);
                     GUILayout.Space(10f);
-
 
                     if (GUILayout.Button("Select Path...", GUILayout.ExpandWidth(false)))
                     {
@@ -113,13 +151,17 @@ namespace RenderDocPlugins
             }
             EditorGUILayout.EndVertical();
 
-            m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft("Auto cal normal if not exist", m_AutoCalcNormalIfNotExist);
-            m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft("Auto cal normal if not exist", m_AutoCalcTangentIfNotExist);
-            m_FlipUV_Y = EditorGUILayout.ToggleLeft("Flip UV Y aixa", m_FlipUV_Y);
+            m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft("Auto calculate normal if not exist", m_AutoCalcNormalIfNotExist);
+            m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft("Auto calculate tangent if not exist", m_AutoCalcTangentIfNotExist);
+            m_OptimizesRendering = EditorGUILayout.ToggleLeft("Optimizes the Mesh data to improve rendering performance.", m_OptimizesRendering);
+            m_MeshCompression = (ModelImporterMeshCompression)EditorGUILayout.EnumPopup("Mesh Compression", m_MeshCompression, GUILayout.ExpandWidth(false));
+
+
+            EditorGUILayout.EndScrollView();
 
             GUILayout.FlexibleSpace();
 
-            EditorGUI.BeginDisabledGroup(string.IsNullOrEmpty(m_SourcePath) || string.IsNullOrEmpty(m_DestPath));
+            EditorGUI.BeginDisabledGroup(!IsAllSourcePathReady() || string.IsNullOrEmpty(m_DestPath));
             {
                 if (GUILayout.Button("Generate Mesh", GUILayout.MinHeight(50f)))
                 {
@@ -130,7 +172,7 @@ namespace RenderDocPlugins
 
         }
 
-        private void HandleDragAndDropGUI(Rect dragdropArea)
+        private void HandleDragAndDropGUI(Rect dragdropArea, int index)
         {
             Event evt = Event.current;
             switch (evt.type)
@@ -167,7 +209,7 @@ namespace RenderDocPlugins
                             var path = DragAndDrop.paths[0];
                             if (IsValidCSVFile(path))
                             {
-                                DoChangeSourceCSV(path);
+                                DoChangeSourceCSV(index, path);
                             }
                         }
                     }
@@ -189,10 +231,12 @@ namespace RenderDocPlugins
         }
 
 
-        private void DoChangeSourceCSV(string fileFullPath)
+        private void DoChangeSourceCSV(int index, string fileFullPath)
         {
-            m_SourcePath = fileFullPath;
-
+            if (index >= 0 && index < m_SourcePath.Length)
+            {
+                m_SourcePath[index] = fileFullPath;
+            }
         }
 
         private void DoChangeDestMesh(string assetPath)
@@ -202,20 +246,56 @@ namespace RenderDocPlugins
 
         private void DoGenerateMesh()
         {
-            CSVToMeshGenerator.Flags flags = CSVToMeshGenerator.Flags.None;
-            if(m_AutoCalcNormalIfNotExist)
+            var setting = new CSVToMeshGenerator.GenSetting();
+            setting.flags = CSVToMeshGenerator.Flags.None;
+            if (m_AutoCalcNormalIfNotExist)
             {
-                flags |= CSVToMeshGenerator.Flags.AutoCalcNormalIfNotExist;
+                setting.flags |= CSVToMeshGenerator.Flags.AutoCalcNormalIfNotExist;
             }
             if (m_AutoCalcTangentIfNotExist)
             {
-                flags |= CSVToMeshGenerator.Flags.AutoCalcTangentIfNotExist;
+                setting.flags |= CSVToMeshGenerator.Flags.AutoCalcTangentIfNotExist;
             }
-            if (m_FlipUV_Y)
+            if (m_OptimizesRendering)
             {
-                flags |= CSVToMeshGenerator.Flags.FlipUV_Y;
+                setting.flags |= CSVToMeshGenerator.Flags.OptimizesRendering;
             }
-            CSVToMeshGenerator.GenerateMesh(m_SourcePath, m_DestPath, flags, Allocator.Temp);
+            setting.compression = m_MeshCompression;
+
+            CSVToMeshGenerator.GenerateMesh(m_SourcePath, m_SubMeshCount, m_DestPath, setting, Allocator.Temp);
+        }
+
+        private int GetCorrectSubMeshCount()
+        {
+            m_SubMeshCount = Mathf.Clamp(m_SubMeshCount, k_MinSubMeshCount, k_MaxSubMeshCount);
+            return m_SubMeshCount;
+        }
+
+        private void TrimSourcePathFromSubMeshCount()
+        {
+            var subMeshCount = GetCorrectSubMeshCount();
+            if (subMeshCount < k_MaxSubMeshCount)
+            {
+                if (!string.IsNullOrEmpty(m_SourcePath[subMeshCount]))
+                {
+                    for (int i = subMeshCount; i < m_SourcePath.Length; ++i)
+                    {
+                        m_SourcePath[i] = string.Empty;
+                    }
+                }
+            }
+        }
+
+        private bool IsAllSourcePathReady()
+        {
+            for (int i = 0; i < m_SubMeshCount; ++i)
+            {
+                if (string.IsNullOrEmpty(m_SourcePath[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

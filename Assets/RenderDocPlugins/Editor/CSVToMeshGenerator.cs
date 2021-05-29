@@ -37,7 +37,13 @@ namespace RenderDocPlugins
             None = 0x0,
             AutoCalcNormalIfNotExist = 0x1,
             AutoCalcTangentIfNotExist = 0x2,
-            FlipUV_Y = 0x4,
+            OptimizesRendering = 0x4,
+        }
+
+        public struct GenSetting
+        {
+            public Flags flags;
+            public ModelImporterMeshCompression compression;
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -180,10 +186,10 @@ namespace RenderDocPlugins
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        struct CSVIndexData
+        struct CSVIndexData : System.IDisposable
         {
-            public int VertexIndex;
-            public int IndicesIndex;
+            public int VertexNumIndex;
+            public int IndicesMumIndex;
             public Vec3Index Pos;
             public Vec3Index Normal;
             public Vec4Index Tangent;
@@ -222,7 +228,7 @@ namespace RenderDocPlugins
                             float val;
                             if (float.TryParse(blockStr, out val))
                             {
-                                if(float.IsNaN(val) || float.IsInfinity(val))
+                                if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
                                     Debug.LogError($"IsNaN Or IsInfinity {blockStr}");
                                     val = 0.0f;
@@ -322,13 +328,15 @@ namespace RenderDocPlugins
 
             public CSVIndexData(Allocator allocator)
             {
-                VertexIndex = -1;
-                IndicesIndex = -1;
+                VertexNumIndex = -1;
+                IndicesMumIndex = -1;
                 Pos = new Vec3Index();
                 Normal = new Vec3Index();
                 Tangent = new Vec4Index();
                 Color = new Vec4Index();
                 Texcoord = new NativeArray<Vec4Index>(k_MaxTexcoord, allocator);
+
+                Reset();
             }
 
             public void SetPos(int index, int pos)
@@ -452,13 +460,13 @@ namespace RenderDocPlugins
 
             public bool IsValid()
             {
-                return (VertexIndex != -1) && (IndicesIndex != -1) && Pos.IsValidAllComponent();
+                return (VertexNumIndex != -1) && (IndicesMumIndex != -1) && Pos.IsValidAllComponent();
             }
 
             public void Reset()
             {
-                VertexIndex = -1;
-                IndicesIndex = -1;
+                VertexNumIndex = -1;
+                IndicesMumIndex = -1;
                 Pos.Reset();
                 Normal.Reset();
                 Tangent.Reset();
@@ -469,6 +477,11 @@ namespace RenderDocPlugins
                     texcoord.Reset();
                     Texcoord[i] = texcoord;
                 }
+            }
+
+            public void Dispose()
+            {
+                Texcoord.Dispose();
             }
 
             public static VertexAttribute GetTexcoordAttribute(int index)
@@ -504,6 +517,64 @@ namespace RenderDocPlugins
             }
         }
 
+        struct CSVMeshInfo : System.IDisposable
+        {
+            public int BaseVertexIndex;
+            public int VertexCount;
+            public int IndexCount;
+            public readonly int SubMeshCount;
+            public NativeArray<SubMeshDescriptor> SubMeshDescArray;
+
+            public CSVMeshInfo(int subMeshCount, Allocator allocator)
+            {
+                BaseVertexIndex = 0;
+                VertexCount = 0;
+                IndexCount = 0;
+                SubMeshCount = subMeshCount;
+                SubMeshDescArray = new NativeArray<SubMeshDescriptor>(subMeshCount, allocator);
+            }
+
+            public void PushSubMesh(NativeArray<CSVSubMeshInfo> subMeshInfoArray)
+            {
+                UnityEngine.Assertions.Assert.IsTrue(subMeshInfoArray.Length == SubMeshCount);
+
+                int minVertexIndex = 0;
+                int maxVertexIndex = 0;
+                int indexCount = 0;
+                for (int i = 0; i < subMeshInfoArray.Length; ++i)
+                {
+                    if (i == 0)
+                    {
+                        minVertexIndex = subMeshInfoArray[i].MinVertexIndex;
+                        maxVertexIndex = subMeshInfoArray[i].MaxVertexIndex;
+                    }
+                    else
+                    {
+                        minVertexIndex = Mathf.Min(subMeshInfoArray[i].MinVertexIndex, minVertexIndex);
+                        maxVertexIndex = Mathf.Max(subMeshInfoArray[i].MaxVertexIndex, maxVertexIndex);
+                    }
+                    var desc = new SubMeshDescriptor(indexCount, subMeshInfoArray[i].IndexCount, MeshTopology.Triangles);
+                    SubMeshDescArray[i] = desc;
+                    indexCount += subMeshInfoArray[i].IndexCount;
+                }
+                BaseVertexIndex = minVertexIndex;
+                VertexCount = maxVertexIndex - minVertexIndex + 1;
+                IndexCount = indexCount;
+            }
+
+            public void Dispose()
+            {
+                SubMeshDescArray.Dispose();
+            }
+        }
+
+        struct CSVSubMeshInfo
+        {
+            public int MinVertexIndex;
+            public int MaxVertexIndex;
+            public int IndexCount;
+        }
+
         struct VertexDataList : System.IDisposable
         {
             private bool dispose;
@@ -513,8 +584,10 @@ namespace RenderDocPlugins
             private int vertexIndexBase;
             private NativeArray<byte> vertexDataSet;
             private int vertexDataSetCount;
-            private int streamMappingBase;
-            private NativeArray<int> streamMapping;
+            private NativeArray<byte> indexDataSet;
+            private int indexDataSetCount;
+            private int offsetMappingBase;
+            private NativeArray<int> offsetMapping;
             private int oneVertexDataTotalSize;
 
             public VertexDataList(NativeArray<VertexAttributeDescriptor> vertexDesc, int vertexCount, int indexCount, int vertexIndexBase, Allocator allocator)
@@ -528,6 +601,8 @@ namespace RenderDocPlugins
                 meshData.SetIndexBufferParams(indexCount, (indexCount > System.UInt16.MaxValue) ? IndexFormat.UInt32 : IndexFormat.UInt16);
                 vertexDataSet = new NativeArray<byte>(vertexCount, allocator, NativeArrayOptions.ClearMemory);
                 vertexDataSetCount = 0;
+                indexDataSet = new NativeArray<byte>(indexCount, allocator, NativeArrayOptions.ClearMemory);
+                indexDataSetCount = 0;
                 {
                     int minIndex = 0;
                     int maxIndex = 0;
@@ -537,24 +612,30 @@ namespace RenderDocPlugins
                         minIndex = Mathf.Min(enumArray[i], minIndex);
                         maxIndex = Mathf.Max(enumArray[i], maxIndex);
                     }
-                    streamMapping = new NativeArray<int>(maxIndex - minIndex + 1, allocator);
-                    for (int i = 0; i < streamMapping.Length; ++i)
+                    offsetMapping = new NativeArray<int>(maxIndex - minIndex + 1, allocator);
+                    for (int i = 0; i < offsetMapping.Length; ++i)
                     {
-                        streamMapping[i] = -1;
+                        offsetMapping[i] = -1;
                     }
                     int byteOffset = 0;
                     for (int i = 0; i < vertexDesc.Length; ++i)
                     {
-                        var byteSize = GetByteSize(vertexDesc[i].format, vertexDesc[i].dimension);
+                        var byteSize = Utils.GetVertexAttributeByteSize(vertexDesc[i]);
                         var attrValue = (int)vertexDesc[i].attribute;
-                        streamMapping[attrValue - minIndex] = byteOffset;
+                        offsetMapping[attrValue - minIndex] = byteOffset;
                         byteOffset += byteSize;
                     }
-                    streamMappingBase = minIndex;
-                    oneVertexDataTotalSize = byteOffset;
+                    this.offsetMappingBase = minIndex;
+                    this.oneVertexDataTotalSize = byteOffset;
+                }
+                unsafe
+                {
+                    var byteArray = meshData.GetVertexData<byte>(0);
+                    UnsafeUtility.MemClear(NativeArrayUnsafeUtility.GetUnsafePtr(byteArray), byteArray.Length);
                 }
 
                 UnityEngine.Assertions.Assert.IsTrue(meshData.GetVertexData<byte>(0).Length == oneVertexDataTotalSize * vertexCount);
+                UnityEngine.Assertions.Assert.IsTrue(meshData.GetIndexData<byte>().Length == ((meshData.indexFormat == IndexFormat.UInt32) ? (4 * indexCount) : (2 * indexCount)));
             }
 
             public IndexFormat GetIndexFormat()
@@ -572,6 +653,11 @@ namespace RenderDocPlugins
                 return vertexDataSetCount;
             }
 
+            public int HasSetIndexDataCount()
+            {
+                return indexDataSetCount;
+            }
+
             public int GetIndexCount()
             {
                 return indexCount;
@@ -586,10 +672,14 @@ namespace RenderDocPlugins
             {
                 return vertexDataSetCount == meshData.vertexCount;
             }
+            public bool IsSetIndexDataFinish()
+            {
+                return indexDataSetCount == indexCount;
+            }
 
             public void SetVertexData<T>(int index, VertexAttribute attr, T data) where T : struct
             {
-                var byteOffset = streamMapping[((int)attr) - streamMappingBase];
+                var byteOffset = offsetMapping[((int)attr) - offsetMappingBase];
                 if (byteOffset != -1)
                 {
                     var byteArray = meshData.GetVertexData<byte>(0);
@@ -597,24 +687,32 @@ namespace RenderDocPlugins
                 }
             }
 
-
-
             public void SetVertexIndexData<T>(int index, T vertexIndex) where T : struct
             {
                 var array = meshData.GetIndexData<T>();
                 array[index] = vertexIndex;
+
+                if (indexDataSet[index] == 0)
+                {
+                    ++indexDataSetCount;
+                    indexDataSet[index] = 1;
+                }
+                else
+                {
+                    UnityEngine.Debug.LogError($"Repeat set index data. index:{index}");
+                }
             }
 
-            public bool HasSetData(int index)
+            public bool HasSetVertexData(int index)
             {
                 return (vertexDataSet[index] != 0);
             }
 
-            public int FindFirstNotSetData()
+            public int FindFirstNotSetVertexData()
             {
-                for(int i = 0; i < vertexDataSet.Length; ++i)
+                for (int i = 0; i < vertexDataSet.Length; ++i)
                 {
-                    if(vertexDataSet[i] == 0)
+                    if (vertexDataSet[i] == 0)
                     {
                         return i;
                     }
@@ -622,7 +720,19 @@ namespace RenderDocPlugins
                 return -1;
             }
 
-            public void SetComplete(int index)
+            public int FindFirstNotSetIndexData()
+            {
+                for (int i = 0; i < indexDataSet.Length; ++i)
+                {
+                    if (indexDataSet[i] == 0)
+                    {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            public void SetCompleteVertexData(int index)
             {
                 if (vertexDataSet[index] == 0)
                 {
@@ -631,10 +741,13 @@ namespace RenderDocPlugins
                 }
             }
 
-            public void ApplyToMesh(Mesh mesh)
+            public void ApplyToMesh(Mesh mesh, in CSVMeshInfo csvMeshInfo)
             {
-                meshData.subMeshCount = 1;
-                meshData.SetSubMesh(0, new SubMeshDescriptor(0, indexCount, MeshTopology.Triangles));
+                meshData.subMeshCount = csvMeshInfo.SubMeshCount;
+                for (int i = 0; i < csvMeshInfo.SubMeshCount; ++i)
+                {
+                    meshData.SetSubMesh(i, csvMeshInfo.SubMeshDescArray[i]);
+                }
                 Mesh.ApplyAndDisposeWritableMeshData(meshDataArray, mesh);
                 mesh.RecalculateBounds();
                 dispose = true;
@@ -648,138 +761,163 @@ namespace RenderDocPlugins
                     dispose = true;
                 }
                 vertexDataSet.Dispose();
-                streamMapping.Dispose();
+                indexDataSet.Dispose();
+                offsetMapping.Dispose();
             }
 
-            private static int GetByteSize(VertexAttributeFormat format)
-            {
-                switch (format)
-                {
-                    case VertexAttributeFormat.Float32: 
-                    case VertexAttributeFormat.UInt32:
-                    case VertexAttributeFormat.SInt32:
-                        return 4;
-                    case VertexAttributeFormat.Float16: 
-                    case VertexAttributeFormat.UNorm16:
-                    case VertexAttributeFormat.SNorm16:
-                    case VertexAttributeFormat.UInt16:
-                    case VertexAttributeFormat.SInt16:
-                        return 2;
-                    case VertexAttributeFormat.UNorm8:
-                    case VertexAttributeFormat.SNorm8:
-                    case VertexAttributeFormat.UInt8:
-                    case VertexAttributeFormat.SInt8:
-                        return 1;
-                }
-                throw new System.IndexOutOfRangeException();
-            }
-
-            private static int GetByteSize(VertexAttributeFormat format, int dimension)
-            {
-                return GetByteSize(format) * dimension;
-            }
         }
 
 
 
-        public static void GenerateMesh(string sourcePath, string targetAssetPath, Flags flags, Allocator allocator)
+        public static void GenerateMesh(string[] sourcePath, int subMeshCount, string targetAssetPath, in GenSetting genSetting, Allocator allocator)
         {
-            if (!System.IO.File.Exists(sourcePath))
+            for (int i = 0; i < subMeshCount; ++i)
             {
-                return;
+                if (!System.IO.File.Exists(sourcePath[i]))
+                {
+                    UnityEngine.Debug.LogError("not exist file:" + sourcePath[i]);
+                    return;
+                }
             }
 
-            var mesh = new Mesh();
-            mesh.name = string.Empty;
-
-            using (System.IO.StreamReader strReader = new System.IO.StreamReader(sourcePath))
+            System.IO.StreamReader[] strReaderArray = new System.IO.StreamReader[subMeshCount];
+            try
             {
-                CSVIndexData indexData = new CSVIndexData(allocator);
-                indexData.Reset();
-
-                var line = strReader.ReadLine();
-                GetCSVIndexData(line, ref indexData);
-                if (!indexData.IsValid())
+                for (int i = 0; i < subMeshCount; ++i)
                 {
-                    UnityEngine.Debug.LogError("Can not read csv properly.");
-                    return;
+                    strReaderArray[i] = new System.IO.StreamReader(sourcePath[i]);
                 }
 
-                int vertexCount;
-                int indexCount;
-                int vertexIndexBase;
-                GetVertexCountFromCSV(strReader, in indexData, out vertexCount, out indexCount, out vertexIndexBase);
-                if (indexCount < 3)
-                {
-                    UnityEngine.Debug.LogError("Read vertexCount not properly.");
-                    return;
-                }
-
-                var vertexAttrArray = indexData.GetVertexAttributes(allocator);
-                var vertexDataList = new VertexDataList(vertexAttrArray, vertexCount, indexCount, vertexIndexBase, allocator);
+                bool succeed = false;
+                var mesh = new Mesh();
+                mesh.name = string.Empty;
+                CSVIndexData csvIndexData = new CSVIndexData();
+                CSVMeshInfo csvMeshInfo = new CSVMeshInfo();
                 try
                 {
-                    line = strReader.ReadLine();
-                    while (!string.IsNullOrEmpty(line))
+                    csvIndexData = new CSVIndexData(allocator);
+                    csvMeshInfo = new CSVMeshInfo(strReaderArray.Length, allocator);
+                    if (!GetCSVIndexDataAndMeshInfo(strReaderArray, ref csvIndexData, ref csvMeshInfo))
                     {
-                        SetVertexData(line, in indexData, flags, ref vertexDataList);
-                        line = strReader.ReadLine();
-                    }
-                    if (!vertexDataList.IsSetVertexDataFinish())
-                    {
-                        UnityEngine.Debug.LogError($"not finish set Vertex Data. VertexCount:{vertexDataList.GetVertexCount()} SetCount:{vertexDataList.HasSetVertexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetData()}");
+                        UnityEngine.Debug.LogError("Can not read csv properly.");
                         return;
                     }
-                    vertexDataList.ApplyToMesh(mesh);
-                    if ((flags & Flags.AutoCalcNormalIfNotExist) != 0)
+                    if (csvMeshInfo.IndexCount < 3)
                     {
-                        if (!indexData.Normal.IsValidAllComponent())
+                        UnityEngine.Debug.LogError("Read vertexCount not properly.");
+                        return;
+                    }
+
+                    var vertexAttrArray = csvIndexData.GetVertexAttributes(allocator);
+                    var vertexDataList = new VertexDataList(vertexAttrArray, csvMeshInfo.VertexCount, csvMeshInfo.IndexCount, csvMeshInfo.BaseVertexIndex, allocator);
+                    try
+                    {
+                        for (int i = 0; i < strReaderArray.Length; ++i)
                         {
-                            mesh.RecalculateNormals();
+                            var subMeshDesc = csvMeshInfo.SubMeshDescArray[i];
+                            var strReader = strReaderArray[i];
+                            var line = strReader.ReadLine();
+                            while (!string.IsNullOrEmpty(line))
+                            {
+                                SetVertexData(line, in csvIndexData, in subMeshDesc, ref vertexDataList);
+                                line = strReader.ReadLine();
+                            }
+                        }
+                        //if (!vertexDataList.IsSetVertexDataFinish())
+                        //{
+                        //    UnityEngine.Debug.LogError($"not finish set Vertex Data. VertexCount:{vertexDataList.GetVertexCount()} SetCount:{vertexDataList.HasSetVertexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetData()}");
+                        //    return;
+                        //}
+                        if (!vertexDataList.IsSetIndexDataFinish())
+                        {
+                            UnityEngine.Debug.LogError($"not finish set Index Data. IndexCount:{vertexDataList.GetIndexCount()} SetCount:{vertexDataList.HasSetIndexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetIndexData()}");
+                            return;
+                        }
+                        vertexDataList.ApplyToMesh(mesh, csvMeshInfo);
+                        if ((genSetting.flags & Flags.AutoCalcNormalIfNotExist) != 0)
+                        {
+                            if (!csvIndexData.Normal.IsValidAllComponent())
+                            {
+                                mesh.RecalculateNormals();
+                            }
+                        }
+                        if ((genSetting.flags & Flags.AutoCalcTangentIfNotExist) != 0)
+                        {
+                            if (!csvIndexData.Tangent.IsValidAllComponent())
+                            {
+                                mesh.RecalculateTangents();
+                            }
+                        }
+                        if ((genSetting.flags & Flags.OptimizesRendering) != 0)
+                        {
+                            MeshUtility.Optimize(mesh);
+                        }
+                        if (genSetting.compression != ModelImporterMeshCompression.Off)
+                        {
+                            MeshUtility.SetMeshCompression(mesh, genSetting.compression);
                         }
                     }
-                    if ((flags & Flags.AutoCalcTangentIfNotExist) != 0)
+                    finally
                     {
-                        if (!indexData.Tangent.IsValidAllComponent())
-                        {
-                            mesh.RecalculateTangents();
-                        }
+                        vertexAttrArray.Dispose();
+                        vertexDataList.Dispose();
                     }
+                    succeed = true;
+                    AssetDatabase.CreateAsset(mesh, targetAssetPath);
+                    AssetDatabase.ImportAsset(targetAssetPath);
+                    Selection.activeObject = mesh;
+                    EditorGUIUtility.PingObject(mesh);
                 }
                 finally
                 {
-                    vertexAttrArray.Dispose();
-                    vertexDataList.Dispose();
+                    csvIndexData.Dispose();
+                    csvMeshInfo.Dispose();
+                    if (!succeed)
+                    {
+                        UnityEngine.Object.DestroyImmediate(mesh);
+                    }
                 }
             }
-
-            AssetDatabase.CreateAsset(mesh, targetAssetPath);
-            AssetDatabase.ImportAsset(targetAssetPath);
-            Selection.activeObject = mesh;
-            EditorGUIUtility.PingObject(mesh);
+            catch (System.Exception e)
+            {
+                UnityEngine.Debug.LogError(e);
+            }
+            finally
+            {
+                for (int i = 0; i < strReaderArray.Length; ++i)
+                {
+                    if (strReaderArray[i] != null)
+                    {
+                        strReaderArray[i].Close();
+                        strReaderArray[i].Dispose();
+                        strReaderArray[i] = null;
+                    }
+                }
+            }
         }
 
-        private static void SetVertexData(string line, in CSVIndexData indexData, Flags flags, ref VertexDataList vertexDataList)
+        private static void SetVertexData(string line, in CSVIndexData indexData, in SubMeshDescriptor subMeshDesc, ref VertexDataList vertexDataList)
         {
-            if (indexData.VertexIndex == -1)
+            if (indexData.VertexNumIndex == -1)
             {
                 return;
             }
-            if (indexData.IndicesIndex == -1)
+            if (indexData.IndicesMumIndex == -1)
             {
                 return;
             }
             var strArr = line.Split(k_CSVSpliter);
-            var indicesIndex = CSVIndexData.GetDataInt(indexData.VertexIndex, strArr, -1);
+            var indicesIndex = CSVIndexData.GetDataInt(indexData.VertexNumIndex, strArr, -1);
             if (indicesIndex == -1)
             {
                 return;
             }
-            if(indicesIndex >= vertexDataList.GetIndexCount())
+            indicesIndex += subMeshDesc.indexStart;
+            if (indicesIndex >= vertexDataList.GetIndexCount())
             {
                 return;
             }
-            var vertexIndex = CSVIndexData.GetDataInt(indexData.IndicesIndex, strArr, -1);
+            var vertexIndex = CSVIndexData.GetDataInt(indexData.IndicesMumIndex, strArr, -1);
             if (vertexIndex == -1)
             {
                 return;
@@ -790,7 +928,7 @@ namespace RenderDocPlugins
                 return;
             }
 
-            if (!vertexDataList.HasSetData(vertexIndex))
+            if (!vertexDataList.HasSetVertexData(vertexIndex))
             {
                 if (indexData.Pos.IsValidAllComponent())
                 {
@@ -826,37 +964,25 @@ namespace RenderDocPlugins
                             case 2:
                                 {
                                     var data = CSVIndexData.GetDataVertor2(indexData.Texcoord[i], strArr, Vector2.zero);
-                                    if ((flags & Flags.FlipUV_Y) != 0)
-                                    {
-                                        data.y = -data.y;
-                                    }
                                     vertexDataList.SetVertexData<Vector2>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
                             case 3:
                                 {
                                     var data = CSVIndexData.GetDataVertor3(indexData.Texcoord[i], strArr, Vector3.zero);
-                                    if ((flags & Flags.FlipUV_Y) != 0)
-                                    {
-                                        data.y = -data.y;
-                                    }
                                     vertexDataList.SetVertexData<Vector3>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
                             case 4:
                                 {
                                     var data = CSVIndexData.GetDataVertor4(indexData.Texcoord[i], strArr, Vector4.zero);
-                                    if ((flags & Flags.FlipUV_Y) != 0)
-                                    {
-                                        data.y = -data.y;
-                                    }
                                     vertexDataList.SetVertexData<Vector4>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
                         }
                     }
                 }
-                vertexDataList.SetComplete(vertexIndex);
+                vertexDataList.SetCompleteVertexData(vertexIndex);
             }
 
             if (vertexDataList.GetIndexFormat() == IndexFormat.UInt16)
@@ -869,18 +995,69 @@ namespace RenderDocPlugins
             }
         }
 
-        private static void GetVertexCountFromCSV(System.IO.StreamReader strReader, in CSVIndexData indexData, out int vertexCount, out int indexCount, out int vertexIndexBase)
+        private static bool GetCSVIndexDataAndMeshInfo(System.IO.StreamReader[] strReader, ref CSVIndexData csvIndexData, ref CSVMeshInfo csvMeshInfo)
         {
+            string line = string.Empty;
+            for (int i = 0; i < strReader.Length; ++i)
+            {
+                var readLine = strReader[i].ReadLine();
+                if (string.IsNullOrEmpty(readLine))
+                {
+                    return false;
+                }
+                if (string.IsNullOrEmpty(line))
+                {
+                    line = readLine;
+                }
+                else
+                {
+                    if (!string.Equals(readLine, line, System.StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+                }
+            }
+            GetCSVIndexData(line, ref csvIndexData);
+            if (!csvIndexData.IsValid())
+            {
+                return false;
+            }
+
+            NativeArray<CSVSubMeshInfo> subMeshInfoArray = new NativeArray<CSVSubMeshInfo>(strReader.Length, Allocator.Temp);
+            for (int i = 0; i < strReader.Length; ++i)
+            {
+                CSVSubMeshInfo subMeshInfo = new CSVSubMeshInfo();
+                GetCSVSubMeshInfo(strReader[i], csvIndexData, ref subMeshInfo);
+                subMeshInfoArray[i] = subMeshInfo;
+            }
+            csvMeshInfo.PushSubMesh(subMeshInfoArray);
+            subMeshInfoArray.Dispose();
+            return true;
+        }
+
+        private static void GetCSVSubMeshInfo(System.IO.StreamReader strReader, in CSVIndexData indexData, ref CSVSubMeshInfo csvSubMeshInfo)
+        {
+            int minTriangleIndex = int.MaxValue;
+            int maxTriangleIndex = -1;
             int minVertexIndex = int.MaxValue;
             int maxVertexIndex = -1;
-            int maxIndicesIndex = -1;
-            var vertexIndex = indexData.VertexIndex;
-            var indicesIndex = indexData.IndicesIndex;
+            var vertexNumIndex = indexData.VertexNumIndex;
+            var indicesNumIndex = indexData.IndicesMumIndex;
 
             var line = strReader.ReadLine();
             while (!string.IsNullOrEmpty(line))
             {
-                var curStr = GetCSVString(line, indicesIndex);
+                var curStr = CSV.GetCSVString(line, indicesNumIndex);
+                if (!string.IsNullOrEmpty(curStr))
+                {
+                    int val;
+                    if (int.TryParse(curStr.Trim(), out val))
+                    {
+                        minTriangleIndex = Mathf.Min(val, minTriangleIndex);
+                        maxTriangleIndex = Mathf.Max(val, maxTriangleIndex);
+                    }
+                }
+                curStr = CSV.GetCSVString(line, vertexNumIndex);
                 if (!string.IsNullOrEmpty(curStr))
                 {
                     int val;
@@ -890,52 +1067,16 @@ namespace RenderDocPlugins
                         maxVertexIndex = Mathf.Max(val, maxVertexIndex);
                     }
                 }
-                curStr = GetCSVString(line, vertexIndex);
-                if (!string.IsNullOrEmpty(curStr))
-                {
-                    int val;
-                    if (int.TryParse(curStr.Trim(), out val))
-                    {
-                        maxIndicesIndex = Mathf.Max(val, maxIndicesIndex);
-                    }
-                }
                 line = strReader.ReadLine();
             }
 
             strReader.DiscardBufferedData();
             strReader.BaseStream.Seek(0, System.IO.SeekOrigin.Begin);
+            // skip header
             strReader.ReadLine();
-            vertexIndexBase = minVertexIndex;
-            vertexCount = maxVertexIndex - minVertexIndex + 1;
-            indexCount = maxIndicesIndex + 1;
-        }
-
-        private static string GetCSVString(string line, int index)
-        {
-            int beginCharIndex = 0;
-            int lastCharIndex = -2;
-            while (index >= 0)
-            {
-                beginCharIndex = lastCharIndex + 2;
-                var find = line.IndexOf(k_CSVSpliter, beginCharIndex);
-                if (find == -1)
-                {
-                    if (index == 0)
-                    {
-                        // 最后一个是没有分隔
-                        lastCharIndex = line.Length - 1;
-                        break;
-                    }
-                    return string.Empty;
-                }
-                lastCharIndex = find - 1;
-                --index;
-            }
-            if (lastCharIndex >= beginCharIndex)
-            {
-                return line.Substring(beginCharIndex, lastCharIndex - beginCharIndex + 1);
-            }
-            return string.Empty;
+            csvSubMeshInfo.MinVertexIndex = minTriangleIndex;
+            csvSubMeshInfo.MaxVertexIndex = maxTriangleIndex;
+            csvSubMeshInfo.IndexCount = maxVertexIndex - minVertexIndex + 1;
         }
 
         private static void GetCSVIndexData(string csvLine, ref CSVIndexData data)
@@ -971,19 +1112,19 @@ namespace RenderDocPlugins
                 }
                 else if (cur.Equals(k_CSVHead_idx, System.StringComparison.Ordinal))
                 {
-                    data.IndicesIndex = i;
+                    data.IndicesMumIndex = i;
                 }
                 else if (cur.Equals(k_CSVHead_vtx, System.StringComparison.Ordinal))
                 {
-                    data.VertexIndex = i;
+                    data.VertexNumIndex = i;
                 }
                 else if (cur.StartsWith(k_CSVHead_BlendIndices, System.StringComparison.Ordinal))
                 {
-                    // not thing
+                    // TODO: not thing 
                 }
                 else if (cur.StartsWith(k_CSVHead_BlendWeight, System.StringComparison.Ordinal))
                 {
-                    // not thing
+                    // TODO: not thing
                 }
                 else
                 {
