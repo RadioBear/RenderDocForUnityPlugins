@@ -10,35 +10,6 @@ namespace RenderDocPlugins
         public const char k_Spliter = ',';
         public const char k_Quota = '"';
 
-
-        //public static string GetCSVString(string line, int index)
-        //{
-        //    int beginCharIndex = 0;
-        //    int lastCharIndex = -2;
-        //    while (index >= 0)
-        //    {
-        //        beginCharIndex = lastCharIndex + 2;
-        //        var find = line.IndexOf(k_Spliter, beginCharIndex);
-        //        if (find == -1)
-        //        {
-        //            if (index == 0)
-        //            {
-        //                // 最后一个是没有分隔
-        //                lastCharIndex = line.Length - 1;
-        //                break;
-        //            }
-        //            return string.Empty;
-        //        }
-        //        lastCharIndex = find - 1;
-        //        --index;
-        //    }
-        //    if (lastCharIndex >= beginCharIndex)
-        //    {
-        //        return line.Substring(beginCharIndex, lastCharIndex - beginCharIndex + 1);
-        //    }
-        //    return string.Empty;
-        //}
-
         public static string GetCSVString(string line, int index)
         {
             int beginCharIndex = -1;

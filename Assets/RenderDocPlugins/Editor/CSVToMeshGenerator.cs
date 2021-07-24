@@ -15,21 +15,7 @@ namespace RenderDocPlugins
         private const int k_MaxTexcoord = 8;
 
         private const char k_CSVSpliter = ',';
-        private const string k_CSVHead_Position = "POSITION";
-        private const string k_CSVHead_Normal = "NORMAL";
-        private const string k_CSVHead_Tangent = "TANGENT";
-        private const string k_CSVHead_Color = "COLOR";
-        private const string k_CSVHead_Texcoord = "TEXCOORD";
-        private const string k_CSVHead_BlendIndices = "BLENDINDICES";
-        private const string k_CSVHead_BlendWeight = "BLENDWEIGHT";
-        private const string k_CSVHead_idx = "IDX";
-        private const string k_CSVHead_vtx = "VTX";
 
-        private const char k_CSVCompSpliter = '.';
-        private const string k_CSVComp_X = "x";
-        private const string k_CSVComp_Y = "y";
-        private const string k_CSVComp_Z = "z";
-        private const string k_CSVComp_W = "w";
 
         [System.Flags]
         public enum Flags
@@ -38,12 +24,21 @@ namespace RenderDocPlugins
             AutoCalcNormalIfNotExist = 0x1,
             AutoCalcTangentIfNotExist = 0x2,
             OptimizesRendering = 0x4,
+            ReadWriteEnable = 0x8,
+        }
+
+        public struct VertexAttributeMapping
+        {
+            public string Name;
+            public VertexAttribute Attr;
+            public bool Disable;
         }
 
         public struct GenSetting
         {
             public Flags flags;
             public ModelImporterMeshCompression compression;
+            public VertexAttributeMapping[] vertexAttrMapping;
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -195,6 +190,8 @@ namespace RenderDocPlugins
             public Vec4Index Tangent;
             public Vec4Index Color;
             public NativeArray<Vec4Index> Texcoord;
+            public Vec4Index BlendWeight;
+            public Vec4Index BlendIndices;
 
             #region Get Data
 
@@ -323,7 +320,32 @@ namespace RenderDocPlugins
                 }
                 return defaultVal;
             }
-
+            public static Vector4Int GetDataVertor4Int(in Vec4Index vec4Index, string[] str, Vector4Int defaultVal)
+            {
+                if (vec4Index.IsValidAllComponent())
+                {
+                    Vector4Int data = defaultVal;
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        var blockStr = str[vec4Index[i]].Trim();
+                        if (!string.IsNullOrEmpty(blockStr))
+                        {
+                            int val;
+                            if (int.TryParse(blockStr, out val))
+                            {
+                                if (float.IsNaN(val) || float.IsInfinity(val))
+                                {
+                                    Debug.LogError($"IsNaN Or IsInfinity {blockStr}");
+                                    val = 0;
+                                }
+                                data[i] = val;
+                            }
+                        }
+                    }
+                    return data;
+                }
+                return defaultVal;
+            }
             #endregion
 
             public CSVIndexData(Allocator allocator)
@@ -335,6 +357,8 @@ namespace RenderDocPlugins
                 Tangent = new Vec4Index();
                 Color = new Vec4Index();
                 Texcoord = new NativeArray<Vec4Index>(k_MaxTexcoord, allocator);
+                BlendWeight = new Vec4Index();
+                BlendIndices = new Vec4Index();
 
                 Reset();
             }
@@ -384,6 +408,22 @@ namespace RenderDocPlugins
                 }
             }
 
+            public void SetBlendWeight(int index, int pos)
+            {
+                if (BlendWeight.IsValidIndex(index))
+                {
+                    BlendWeight[index] = pos;
+                }
+            }
+
+            public void SetBlendIndices(int index, int pos)
+            {
+                if (BlendIndices.IsValidIndex(index))
+                {
+                    BlendIndices[index] = pos;
+                }
+            }
+
             public NativeArray<VertexAttributeDescriptor> GetVertexAttributes(Allocator allocator)
             {
                 int count = 0;
@@ -399,6 +439,9 @@ namespace RenderDocPlugins
                         ++count;
                     }
                 }
+                if (BlendWeight.IsValidAllComponent()) { ++count; }
+                if (BlendIndices.IsValidAllComponent()) { ++count; }
+
                 NativeArray<VertexAttributeDescriptor> array = new NativeArray<VertexAttributeDescriptor>(count, allocator);
                 count = 0;
                 if (Pos.IsValidAllComponent())
@@ -455,6 +498,26 @@ namespace RenderDocPlugins
                         ++count;
                     }
                 }
+                if (BlendWeight.IsValidAllComponent())
+                {
+                    array[count] = new VertexAttributeDescriptor(
+                        VertexAttribute.BlendWeight,
+                        VertexAttributeFormat.Float32,
+                        4,
+                        0
+                        );
+                    ++count;
+                }
+                if (BlendIndices.IsValidAllComponent())
+                {
+                    array[count] = new VertexAttributeDescriptor(
+                        VertexAttribute.BlendIndices,
+                        VertexAttributeFormat.SInt32,
+                        4,
+                        0
+                        );
+                    ++count;
+                }
                 return array;
             }
 
@@ -477,6 +540,8 @@ namespace RenderDocPlugins
                     texcoord.Reset();
                     Texcoord[i] = texcoord;
                 }
+                BlendWeight.Reset();
+                BlendIndices.Reset();
             }
 
             public void Dispose()
@@ -797,7 +862,7 @@ namespace RenderDocPlugins
                 {
                     csvIndexData = new CSVIndexData(allocator);
                     csvMeshInfo = new CSVMeshInfo(strReaderArray.Length, allocator);
-                    if (!GetCSVIndexDataAndMeshInfo(strReaderArray, ref csvIndexData, ref csvMeshInfo))
+                    if (!GetCSVIndexDataAndMeshInfo(strReaderArray, genSetting.vertexAttrMapping, ref csvIndexData, ref csvMeshInfo))
                     {
                         UnityEngine.Debug.LogError("Can not read csv properly.");
                         return;
@@ -954,6 +1019,18 @@ namespace RenderDocPlugins
                     vertexDataList.SetVertexData<Vector4>(vertexIndex, VertexAttribute.Color, data);
                 }
 
+                if (indexData.BlendWeight.IsValidAllComponent())
+                {
+                    var data = CSVIndexData.GetDataVertor4(in indexData.BlendWeight, strArr, Vector4.zero);
+                    vertexDataList.SetVertexData<Vector4>(vertexIndex, VertexAttribute.BlendWeight, data);
+                }
+
+                if (indexData.BlendIndices.IsValidAllComponent())
+                {
+                    var data = CSVIndexData.GetDataVertor4Int(in indexData.BlendIndices, strArr, Vector4Int.zero);
+                    vertexDataList.SetVertexData<Vector4Int>(vertexIndex, VertexAttribute.BlendIndices, data);
+                }
+
                 for (int i = 0; i < indexData.Texcoord.Length; ++i)
                 {
                     var len = indexData.Texcoord[i].GetValidComponentLength();
@@ -995,7 +1072,7 @@ namespace RenderDocPlugins
             }
         }
 
-        private static bool GetCSVIndexDataAndMeshInfo(System.IO.StreamReader[] strReader, ref CSVIndexData csvIndexData, ref CSVMeshInfo csvMeshInfo)
+        private static bool GetCSVIndexDataAndMeshInfo(System.IO.StreamReader[] strReader, VertexAttributeMapping[] mapping, ref CSVIndexData csvIndexData, ref CSVMeshInfo csvMeshInfo)
         {
             string line = string.Empty;
             for (int i = 0; i < strReader.Length; ++i)
@@ -1017,7 +1094,7 @@ namespace RenderDocPlugins
                     }
                 }
             }
-            GetCSVIndexData(line, ref csvIndexData);
+            GetCSVIndexData(line, mapping, ref csvIndexData);
             if (!csvIndexData.IsValid())
             {
                 return false;
@@ -1079,107 +1156,103 @@ namespace RenderDocPlugins
             csvSubMeshInfo.IndexCount = maxVertexIndex - minVertexIndex + 1;
         }
 
-        private static void GetCSVIndexData(string csvLine, ref CSVIndexData data)
+        private static void GetCSVIndexData(string csvLine, VertexAttributeMapping[] mapping, ref CSVIndexData data)
         {
+            Dictionary<string, VertexAttributeMapping> mappingDict = null;
+            if (mapping != null)
+            {
+                mappingDict = new Dictionary<string, VertexAttributeMapping>(mapping.Length);
+                for (int i = 0; i < mapping.Length; ++i)
+                {
+                    mappingDict[mapping[i].Name] = mapping[i];
+                }
+            }
+
             var strArr = csvLine.Split(k_CSVSpliter);
             for (int i = 0; i < strArr.Length; ++i)
             {
+                var curAttr = VertexAttribute.Position;
+                bool findAttr = false;
                 var cur = strArr[i].Trim();
-                if (cur.StartsWith(k_CSVHead_Position, System.StringComparison.Ordinal))
-                {
-                    data.SetPos(ParseComponentIndex(cur, k_CSVHead_Position.Length), i);
-                }
-                else if (cur.StartsWith(k_CSVHead_Normal, System.StringComparison.Ordinal))
-                {
-                    data.SetNormal(ParseComponentIndex(cur, k_CSVHead_Normal.Length), i);
-                }
-                else if (cur.StartsWith(k_CSVHead_Tangent, System.StringComparison.Ordinal))
-                {
-                    data.SetTangent(ParseComponentIndex(cur, k_CSVHead_Tangent.Length), i);
-                }
-                else if (cur.StartsWith(k_CSVHead_Color, System.StringComparison.Ordinal))
-                {
-                    data.SetColor(ParseComponentIndex(cur, k_CSVHead_Color.Length), i);
-                }
-                else if (cur.StartsWith(k_CSVHead_Texcoord, System.StringComparison.Ordinal))
-                {
-                    int len;
-                    var texcoordIndex = ParseTexcoordIndex(cur, k_CSVHead_Texcoord.Length, out len);
-                    if (texcoordIndex != -1)
-                    {
-                        data.SetTexcoord(texcoordIndex, ParseComponentIndex(cur, k_CSVHead_Texcoord.Length + len), i);
-                    }
-                }
-                else if (cur.Equals(k_CSVHead_idx, System.StringComparison.Ordinal))
+                string compString = string.Empty;
+                var headerString = RenderDocCSV.ParseVertexAttrName(cur, out compString);
+
+                if (RenderDocCSV.ParseTriangleIndices(headerString))
                 {
                     data.IndicesMumIndex = i;
+                    continue;
                 }
-                else if (cur.Equals(k_CSVHead_vtx, System.StringComparison.Ordinal))
+
+                if (RenderDocCSV.ParseVertexID(headerString))
                 {
                     data.VertexNumIndex = i;
+                    continue;
                 }
-                else if (cur.StartsWith(k_CSVHead_BlendIndices, System.StringComparison.Ordinal))
+
+
+                if (mappingDict != null)
                 {
-                    // TODO: not thing 
+                    VertexAttributeMapping vertexMapping;
+                    if (mappingDict.TryGetValue(headerString, out vertexMapping))
+                    {
+                        if (vertexMapping.Disable)
+                        {
+                            // Ignore
+                            continue;
+                        }
+                        curAttr = vertexMapping.Attr;
+                        findAttr = true;
+                    }
                 }
-                else if (cur.StartsWith(k_CSVHead_BlendWeight, System.StringComparison.Ordinal))
+                if (!findAttr)
                 {
-                    // TODO: not thing
+                    // fallback
+                    findAttr = RenderDocCSV.SpeculateVertextAttr(headerString, out curAttr);
                 }
-                else
+                if (!findAttr)
                 {
-                    UnityEngine.Debug.LogError($"Not support: {cur}");
+                    UnityEngine.Debug.LogError($"Can not match Vertex Attribute: {cur}");
+                    continue;
+                }
+
+                var compIndex = RenderDocCSV.ParseComponentIndex(compString);
+                switch (curAttr)
+                {
+                    case VertexAttribute.Position:
+                        data.SetPos(compIndex, i);
+                        break;
+                    case VertexAttribute.Normal:
+                        data.SetNormal(compIndex, i);
+                        break;
+                    case VertexAttribute.Tangent:
+                        data.SetTangent(compIndex, i);
+                        break;
+                    case VertexAttribute.Color:
+                        data.SetColor(compIndex, i);
+                        break;
+                    case VertexAttribute.TexCoord0:
+                    case VertexAttribute.TexCoord1:
+                    case VertexAttribute.TexCoord2:
+                    case VertexAttribute.TexCoord3:
+                    case VertexAttribute.TexCoord4:
+                    case VertexAttribute.TexCoord5:
+                    case VertexAttribute.TexCoord6:
+                    case VertexAttribute.TexCoord7:
+                        data.SetTexcoord(curAttr - VertexAttribute.TexCoord0, compIndex, i);
+                        break;
+                    case VertexAttribute.BlendWeight:
+                        data.SetBlendWeight(compIndex, i);
+                        break;
+                    case VertexAttribute.BlendIndices:
+                        data.SetBlendIndices(compIndex, i);
+                        break;
+                    default:
+                        UnityEngine.Debug.LogError($"Not support: {curAttr}");
+                        break;
                 }
             }
 
         }
 
-        private static int ParseTexcoordIndex(string str, int begin, out int len)
-        {
-            int end = begin;
-            while ((end < str.Length) && char.IsDigit(str[end]))
-            {
-                ++end;
-            }
-            if (end > begin)
-            {
-                int outIndex;
-                if (int.TryParse(str.Substring(begin, end - begin), out outIndex))
-                {
-                    len = end - begin;
-                    return outIndex;
-                }
-            }
-            len = 0;
-            return -1;
-        }
-
-        private static int ParseComponentIndex(string str, int begin)
-        {
-            if (begin >= 0 && begin < str.Length)
-            {
-                if (str[begin] == k_CSVCompSpliter)
-                {
-                    var compStr = str.Substring(begin + 1);
-                    if (compStr.Equals(k_CSVComp_X, System.StringComparison.Ordinal))
-                    {
-                        return 0;
-                    }
-                    else if (compStr.Equals(k_CSVComp_Y, System.StringComparison.Ordinal))
-                    {
-                        return 1;
-                    }
-                    else if (compStr.Equals(k_CSVComp_Z, System.StringComparison.Ordinal))
-                    {
-                        return 2;
-                    }
-                    else if (compStr.Equals(k_CSVComp_W, System.StringComparison.Ordinal))
-                    {
-                        return 3;
-                    }
-                }
-            }
-            return -1;
-        }
     }
 }
