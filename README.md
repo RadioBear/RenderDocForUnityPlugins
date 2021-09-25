@@ -29,3 +29,7 @@ Then run the menu command "RenderDocPlugins/Import Mesh From CSV" to open the ed
 - TexCoord5
 - TexCoord6
 - TexCoord7
+
+### Screenshot
+
+![Screenshot](Screenshot/screenshot.png)
