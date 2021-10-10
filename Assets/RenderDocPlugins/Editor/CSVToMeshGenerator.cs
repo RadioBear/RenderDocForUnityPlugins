@@ -25,6 +25,7 @@ namespace RenderDocPlugins
             AutoCalcTangentIfNotExist = 0x2,
             OptimizesRendering = 0x4,
             ReadWriteEnable = 0x8,
+            FlipVertexWindingOrder = 0x10,
         }
 
         public struct VertexAttributeMapping
@@ -752,7 +753,19 @@ namespace RenderDocPlugins
                 }
             }
 
-            public void SetVertexIndexData<T>(int index, T vertexIndex) where T : struct
+            public void SetVertexIndexData(int indicesIndex, int vertexIndex)
+            {
+                if (GetIndexFormat() == IndexFormat.UInt16)
+                {
+                    SetVertexIndexData(indicesIndex, System.Convert.ToUInt16(vertexIndex));
+                }
+                else
+                {
+                    SetVertexIndexData(indicesIndex, System.Convert.ToUInt32(vertexIndex));
+                }
+            }
+
+            private void SetVertexIndexData<T>(int index, T vertexIndex) where T : struct
             {
                 var array = meshData.GetIndexData<T>();
                 array[index] = vertexIndex;
@@ -765,6 +778,32 @@ namespace RenderDocPlugins
                 else
                 {
                     UnityEngine.Debug.LogError($"Repeat set index data. index:{index}");
+                }
+            }
+
+            public void FlipVertexWindingOrder()
+            {
+                if (GetIndexFormat() == IndexFormat.UInt16)
+                {
+                    FlipVertexWindingOrder<System.UInt16>();
+                }
+                else
+                {
+                    FlipVertexWindingOrder<System.UInt32>();
+                }
+            }
+
+            private void FlipVertexWindingOrder<T>() where T : struct
+            {
+                var array = meshData.GetIndexData<T>();
+                int beginIndex = 0;
+                while(beginIndex < array.Length)
+                {
+                    var order_0 = array[beginIndex];
+                    var order_2 = array[beginIndex + 2];
+                    array[beginIndex] = order_2;
+                    array[beginIndex + 2] = order_0;
+                    beginIndex += 3;
                 }
             }
 
@@ -897,6 +936,10 @@ namespace RenderDocPlugins
                         {
                             UnityEngine.Debug.LogError($"not finish set Index Data. IndexCount:{vertexDataList.GetIndexCount()} SetCount:{vertexDataList.HasSetIndexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetIndexData()}");
                             return;
+                        }
+                        if ((genSetting.flags & Flags.FlipVertexWindingOrder) != 0)
+                        {
+                            vertexDataList.FlipVertexWindingOrder();
                         }
                         vertexDataList.ApplyToMesh(mesh, csvMeshInfo);
                         if ((genSetting.flags & Flags.AutoCalcNormalIfNotExist) != 0)
@@ -1062,14 +1105,7 @@ namespace RenderDocPlugins
                 vertexDataList.SetCompleteVertexData(vertexIndex);
             }
 
-            if (vertexDataList.GetIndexFormat() == IndexFormat.UInt16)
-            {
-                vertexDataList.SetVertexIndexData(indicesIndex, System.Convert.ToUInt16(vertexIndex));
-            }
-            else
-            {
-                vertexDataList.SetVertexIndexData(indicesIndex, System.Convert.ToUInt32(vertexIndex));
-            }
+            vertexDataList.SetVertexIndexData(indicesIndex, vertexIndex);
         }
 
         private static bool GetCSVIndexDataAndMeshInfo(System.IO.StreamReader[] strReader, VertexAttributeMapping[] mapping, ref CSVIndexData csvIndexData, ref CSVMeshInfo csvMeshInfo)

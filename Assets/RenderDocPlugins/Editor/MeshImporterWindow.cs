@@ -108,6 +108,9 @@ namespace RenderDocPlugins
         private string m_ErrorMessage = string.Empty;
 
         [SerializeField]
+        private bool m_FlipVertexWindingOrder = false;
+
+        [SerializeField]
         private List<VertexAttrSetting> m_VertexAttrList = new List<VertexAttrSetting>();
 
         [SerializeField]
@@ -269,9 +272,12 @@ namespace RenderDocPlugins
             EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
             {
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Vertex Attribute Mapping");
+                GUILayout.Label("Vertex Attribute Mapping (Determined by the CSV of the first submesh)");
                 GUILayout.FlexibleSpace();
-                DoPresetsDropDown();
+                if (m_VertexAttrList.Count > 0)
+                {
+                    DoPresetsDropDown();
+                }
                 EditorGUILayout.EndHorizontal();
 
                 if (m_VertexAttrList.Count <= 0)
@@ -313,10 +319,11 @@ namespace RenderDocPlugins
 
             GUILayout.Space(10f);
 
-            m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate normal if not exist", "Source of mesh normals. If a mesh has no normals, they will be calculated instead."), m_AutoCalcNormalIfNotExist);
-            m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate tangent if not exist", "Source of mesh tangents. If a mesh has no tangents, they will be calculated instead."), m_AutoCalcTangentIfNotExist);
-            m_OptimizesRendering = EditorGUILayout.ToggleLeft(new GUIContent("Optimize Mesh", "Reorder vertices and/or polygons for better GPU performance."), m_OptimizesRendering);
-            m_ReadWriteEnable = EditorGUILayout.ToggleLeft(new GUIContent("Read/Write Enabled", "Allow vertices and indices to be accessed from script."), m_ReadWriteEnable);
+            m_FlipVertexWindingOrder = EditorGUILayout.ToggleLeft(new GUIContent("Flip Vertex Winding Order", "vertices of triangles in counter-clockwise order (or in clockwise order in DirectX)"), m_FlipVertexWindingOrder, GUILayout.ExpandWidth(false));
+            m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate normal if not exist", "Source of mesh normals. If a mesh has no normals, they will be calculated instead."), m_AutoCalcNormalIfNotExist, GUILayout.ExpandWidth(false));
+            m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate tangent if not exist", "Source of mesh tangents. If a mesh has no tangents, they will be calculated instead."), m_AutoCalcTangentIfNotExist, GUILayout.ExpandWidth(false));
+            m_OptimizesRendering = EditorGUILayout.ToggleLeft(new GUIContent("Optimize Mesh", "Reorder vertices and/or polygons for better GPU performance."), m_OptimizesRendering, GUILayout.ExpandWidth(false));
+            m_ReadWriteEnable = EditorGUILayout.ToggleLeft(new GUIContent("Read/Write Enabled", "Allow vertices and indices to be accessed from script."), m_ReadWriteEnable, GUILayout.ExpandWidth(false));
             m_MeshCompression = (ModelImporterMeshCompression)EditorGUILayout.EnumPopup(new GUIContent("Mesh Compression", "Higher compression ratio means lower mesh precision. If enabled, the mesh bounds and a lower bit depth per component are used to compress the mesh data."), m_MeshCompression, GUILayout.ExpandWidth(false));
 
 
@@ -337,6 +344,10 @@ namespace RenderDocPlugins
 
         #region  Preset
 
+        /// <summary>
+        /// Get Preset From UI Setting
+        /// </summary>
+        /// <returns></returns>
         public VertexAttributeMappingPreset GetCurrentVertexAttributeMappingPreset()
         {
             if(m_VertexAttrList.Count > 0)
@@ -450,6 +461,18 @@ namespace RenderDocPlugins
             return false;
         }
 
+        private bool IsExistSourceCSV()
+        {
+            if(m_SourcePath.Length > 0)
+            {
+                if (!string.IsNullOrEmpty(m_SourcePath[0]))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private void DoChangeSourceCSV(int index, string fileFullPath)
         {
             if (index >= 0 && index < m_SourcePath.Length)
@@ -521,6 +544,10 @@ namespace RenderDocPlugins
 
             var setting = new CSVToMeshGenerator.GenSetting();
             setting.flags = CSVToMeshGenerator.Flags.None;
+            if (m_FlipVertexWindingOrder)
+            {
+                setting.flags |= CSVToMeshGenerator.Flags.FlipVertexWindingOrder;
+            }
             if (m_AutoCalcNormalIfNotExist)
             {
                 setting.flags |= CSVToMeshGenerator.Flags.AutoCalcNormalIfNotExist;
