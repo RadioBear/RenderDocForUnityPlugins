@@ -248,7 +248,7 @@ namespace RenderDocPlugins
                 if (vec4Index.IsValidAllComponent())
                 {
                     Vector4 data = defaultVal;
-                    for (int i = 0; i < 3; ++i)
+                    for (int i = 0; i < 4; ++i)
                     {
                         var blockStr = str[vec4Index[i]].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
