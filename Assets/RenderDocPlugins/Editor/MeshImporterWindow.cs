@@ -207,7 +207,7 @@ namespace RenderDocPlugins
                         if (string.IsNullOrEmpty(m_SourcePath[subMeshIndex]))
                         {
                             GUILayout.FlexibleSpace();
-                            GUILayout.Label("not select source csv file. Or you can drop csv file to here.", GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
+                            GUILayout.Label("Have not selected source csv file. Or you can drop csv file to here.", GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
                             GUILayout.FlexibleSpace();
                         }
                         else

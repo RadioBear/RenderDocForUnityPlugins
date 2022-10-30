@@ -17,6 +17,7 @@ namespace RenderDocPlugins
         private const string k_CSVHead_Name = "Name";
         private const string k_CSVHead_Value = "Value";
         private const string k_CSVHead_Type = "Type";
+        private const string k_CSVHead_ByteOffset = "Byte Offset";
 
         public TextAsset m_CSV;
 
@@ -85,12 +86,14 @@ namespace RenderDocPlugins
             public int NameIndex;
             public int ValueIndex;
             public int TypeIndex;
+            public int ByteOffset;
 
             public void Reset()
             {
                 NameIndex = -1;
                 ValueIndex = -1;
                 TypeIndex = -1;
+                ByteOffset = -1;
             }
         }
 
@@ -169,6 +172,10 @@ namespace RenderDocPlugins
                 else if (cur.Equals(k_CSVHead_Type, System.StringComparison.Ordinal))
                 {
                     data.TypeIndex = i;
+                }
+                else if (cur.Equals(k_CSVHead_ByteOffset, System.StringComparison.Ordinal))
+                {
+                    data.ByteOffset = i;
                 }
                 else
                 {
