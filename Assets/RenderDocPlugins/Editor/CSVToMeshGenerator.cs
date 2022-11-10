@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -6,9 +5,220 @@ using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEditor;
+using System;
+using System.Windows.Markup;
+using System.Security.Policy;
+using static UnityEditor.PlayerSettings;
 
 namespace RenderDocPlugins
 {
+    [System.Serializable]
+    public struct VertexAttributeMapping
+    {
+        public enum Manipulation
+        {
+            Nothing,
+            Negation,
+        }
+        public const int ComponentCount = 4;
+        public static readonly string[] ComponentName = new string[]
+        {
+            "X",
+            "Y",
+            "Z",
+            "W",
+        };
+        public enum Swizzle
+        {
+            [InspectorName("X (R)")]
+            X,
+            [InspectorName("Y (G)")]
+            Y,
+            [InspectorName("Z (B)")]
+            Z,
+            [InspectorName("W (A)")]
+            W,
+        }
+        [System.Serializable]
+        public struct ModifyData
+        {
+            // whitch value get
+            [SerializeField]
+            public Swizzle Swizzle;
+            [SerializeField]
+            public Manipulation Manipulation;
+
+            public ModifyData(Swizzle index)
+            {
+                Swizzle = index;
+                Manipulation = Manipulation.Nothing;
+            }
+
+            public void Reset(Swizzle index)
+            {
+                Swizzle = index;
+                Manipulation = Manipulation.Nothing;
+            }
+
+            private static float GetDataValue(in UnityEngine.Vector2 data, Swizzle index, float defaultVal)
+            {
+                return index switch
+                {
+                    Swizzle.X => data.x,
+                    Swizzle.Y => data.y,
+                    _ => defaultVal,
+                };
+            }
+
+            private static float GetDataValue(in UnityEngine.Vector3 data, Swizzle index, float defaultVal)
+            {
+                return index switch
+                {
+                    Swizzle.X => data.x,
+                    Swizzle.Y => data.y,
+                    Swizzle.Z => data.z,
+                    _ => defaultVal,
+                };
+            }
+
+            private static float GetDataValue(in UnityEngine.Vector4 data, Swizzle index, float defaultVal)
+            {
+                return index switch
+                {
+                    Swizzle.X => data.x,
+                    Swizzle.Y => data.y,
+                    Swizzle.Z => data.z,
+                    Swizzle.W => data.w,
+                    _ => defaultVal,
+                };
+            }
+
+            private static int GetDataValue(in Vector4Int data, Swizzle index, int defaultVal)
+            {
+                return index switch
+                {
+                    Swizzle.X => data.x,
+                    Swizzle.Y => data.y,
+                    Swizzle.Z => data.z,
+                    Swizzle.W => data.w,
+                    _ => defaultVal,
+                };
+            }
+
+            private static float ApplyManipulation(Manipulation man, float val)
+            {
+                return man switch
+                {
+                    Manipulation.Negation => -val,
+                    _ => val,
+                };
+            }
+
+            private static int ApplyManipulation(Manipulation man, int val)
+            {
+                return man switch
+                {
+                    Manipulation.Negation => -val,
+                    _ => val,
+                };
+            }
+
+            public float ApplyData(float data)
+            {
+                return ApplyManipulation(Manipulation, data);
+            }
+
+            public float ApplyData(in UnityEngine.Vector2 data)
+            {
+                float val = GetDataValue(data, Swizzle, 0.0f);
+                val = ApplyManipulation(Manipulation, val);
+                return val;
+            }
+
+            public float ApplyData(in UnityEngine.Vector3 data)
+            {
+                float val = GetDataValue(data, Swizzle, 0.0f);
+                val = ApplyManipulation(Manipulation, val);
+                return val;
+            }
+
+            public float ApplyData(in UnityEngine.Vector4 data)
+            {
+                float val = GetDataValue(data, Swizzle, 0.0f);
+                val = ApplyManipulation(Manipulation, val);
+                return val;
+            }
+
+            public int ApplyData(in Vector4Int data)
+            {
+                int val = GetDataValue(data, Swizzle, 0);
+                val = ApplyManipulation(Manipulation, val);
+                return val;
+            }
+        }
+        [SerializeField]
+        public string Name;
+        [SerializeField]
+        public VertexAttribute Attr;
+        [SerializeField]
+        public bool Enable;
+        [SerializeField]
+        public bool Modify;
+        [SerializeField]
+        public ModifyData ModifyComponentX;
+        [SerializeField]
+        public ModifyData ModifyComponentY;
+        [SerializeField]
+        public ModifyData ModifyComponentZ;
+        [SerializeField]
+        public ModifyData ModifyComponentW;
+
+        public void Reset()
+        {
+            Name = String.Empty;
+            Attr = VertexAttribute.Position;
+            Enable = false;
+            Modify = false;
+            ModifyComponentX.Reset(Swizzle.X);
+            ModifyComponentY.Reset(Swizzle.Y);
+            ModifyComponentZ.Reset(Swizzle.Z);
+            ModifyComponentW.Reset(Swizzle.W);
+        }
+
+        public void ResetModify()
+        {
+            ModifyComponentX.Swizzle = Swizzle.X;
+            ModifyComponentY.Swizzle = Swizzle.Y;
+            ModifyComponentZ.Swizzle = Swizzle.Z;
+            ModifyComponentW.Swizzle = Swizzle.W;
+        }
+
+        public ModifyData GetModifyData(int index)
+        {
+            return index switch
+            {
+                0 => ModifyComponentX,
+                1 => ModifyComponentY,
+                2 => ModifyComponentZ,
+                3 => ModifyComponentW,
+                _ => throw new System.IndexOutOfRangeException(string.Format("Invalid index addressed: {0}!", index)),
+            };
+        }
+
+        public static ref ModifyData GetModifyData(ref VertexAttributeMapping foo, int index)
+        {
+            switch (index)
+            {
+                case 0: return ref foo.ModifyComponentX;
+                case 1: return ref foo.ModifyComponentY;
+                case 2: return ref foo.ModifyComponentZ;
+                case 3: return ref foo.ModifyComponentW;
+            }
+            throw new System.IndexOutOfRangeException(string.Format("Invalid index addressed: {0}!", index));
+        }
+
+    }
+
     public class CSVToMeshGenerator
     {
 
@@ -21,23 +231,28 @@ namespace RenderDocPlugins
         public enum Flags
         {
             None = 0x0,
-            AutoCalcNormalIfNotExist = 0x1,
-            AutoCalcTangentIfNotExist = 0x2,
-            OptimizesRendering = 0x4,
-            ReadWriteEnable = 0x8,
-            FlipVertexWindingOrder = 0x10,
+            OptimizesRendering = 0x1,
+            ReadWriteEnable = 0x2,
+            FlipVertexWindingOrder = 0x4,
         }
 
-        public struct VertexAttributeMapping
+        public enum AutoCalcMode
         {
-            public string Name;
-            public VertexAttribute Attr;
-            public bool Disable;
+            [InspectorName("Don't Calculate")]
+            NotCalc,
+            [InspectorName("If Not Exist")]
+            IfNotExist,
+            [InspectorName("Force")]
+            Force,
         }
+
+        
 
         public struct GenSetting
         {
             public Flags flags;
+            public AutoCalcMode calcNormal;
+            public AutoCalcMode calcTangent;
             public ModelImporterMeshCompression compression;
             public VertexAttributeMapping[] vertexAttrMapping;
         }
@@ -48,12 +263,20 @@ namespace RenderDocPlugins
             public int X;
             public int Y;
             public int Z;
+            public bool Modify;
+            public VertexAttributeMapping.ModifyData ModifyX;
+            public VertexAttributeMapping.ModifyData ModifyY;
+            public VertexAttributeMapping.ModifyData ModifyZ;
 
             public void Reset()
             {
                 X = -1;
                 Y = -1;
                 Z = -1;
+                Modify = false;
+                ModifyX.Reset(VertexAttributeMapping.Swizzle.X);
+                ModifyY.Reset(VertexAttributeMapping.Swizzle.Y);
+                ModifyZ.Reset(VertexAttributeMapping.Swizzle.Z);
             }
 
             public bool IsValidAllComponent()
@@ -75,14 +298,13 @@ namespace RenderDocPlugins
             {
                 get
                 {
-                    switch (index)
+                    return index switch
                     {
-                        case 0: return X;
-                        case 1: return Y;
-                        case 2: return Z;
-                        default:
-                            throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index));
-                    }
+                        0 => X,
+                        1 => Y,
+                        2 => Z,
+                        _ => throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index)),
+                    };
                 }
 
                 set
@@ -97,6 +319,40 @@ namespace RenderDocPlugins
                     }
                 }
             }
+
+            public VertexAttributeMapping.ModifyData GetModifyData(int index)
+            {
+                return index switch
+                {
+                    0 => ModifyX,
+                    1 => ModifyY,
+                    2 => ModifyZ,
+                    _ => throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index)),
+                };
+            }
+
+            public void SetModifyData(int index, in VertexAttributeMapping.ModifyData data)
+            {
+                switch(index)
+                {
+                    case 0: ModifyX = data; break;
+                    case 1: ModifyY = data; break;
+                    case 2: ModifyZ = data; break;
+                    default:
+                        throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index));
+                }
+            }
+
+            public void ApplyModifyData(ref Vector3 data)
+            {
+                if(Modify)
+                {
+                    var oldData = data;
+                    data.x = ModifyX.ApplyData(oldData);
+                    data.y = ModifyY.ApplyData(oldData);
+                    data.z = ModifyZ.ApplyData(oldData);
+                }
+            }
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -106,6 +362,11 @@ namespace RenderDocPlugins
             public int Y;
             public int Z;
             public int W;
+            public bool Modify;
+            public VertexAttributeMapping.ModifyData ModifyX;
+            public VertexAttributeMapping.ModifyData ModifyY;
+            public VertexAttributeMapping.ModifyData ModifyZ;
+            public VertexAttributeMapping.ModifyData ModifyW;
 
             public void Reset()
             {
@@ -113,6 +374,11 @@ namespace RenderDocPlugins
                 Y = -1;
                 Z = -1;
                 W = -1;
+                Modify = false;
+                ModifyX.Reset(VertexAttributeMapping.Swizzle.X);
+                ModifyY.Reset(VertexAttributeMapping.Swizzle.Y);
+                ModifyZ.Reset(VertexAttributeMapping.Swizzle.Z);
+                ModifyW.Reset(VertexAttributeMapping.Swizzle.W);
             }
 
             public bool IsValidAllComponent()
@@ -155,15 +421,14 @@ namespace RenderDocPlugins
             {
                 get
                 {
-                    switch (index)
+                    return index switch
                     {
-                        case 0: return X;
-                        case 1: return Y;
-                        case 2: return Z;
-                        case 3: return W;
-                        default:
-                            throw new System.IndexOutOfRangeException(string.Format("Invalid Vec4Index index addressed: {0}!", index));
-                    }
+                        0 => X,
+                        1 => Y,
+                        2 => Z,
+                        3 => W,
+                        _ => throw new System.IndexOutOfRangeException(string.Format("Invalid Vec4Index index addressed: {0}!", index)),
+                    };
                 }
 
                 set
@@ -177,6 +442,84 @@ namespace RenderDocPlugins
                         default:
                             throw new System.IndexOutOfRangeException(string.Format("Invalid Vec4Index index addressed: {0}!", index));
                     }
+                }
+            }
+
+            public VertexAttributeMapping.ModifyData GetModifyData(int index)
+            {
+                return index switch
+                {
+                    0 => ModifyX,
+                    1 => ModifyY,
+                    2 => ModifyZ,
+                    3 => ModifyW,
+                    _ => throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index)),
+                };
+            }
+
+            public void SetModifyData(int index, in VertexAttributeMapping.ModifyData data)
+            {
+                switch (index)
+                {
+                    case 0: ModifyX = data; break;
+                    case 1: ModifyY = data; break;
+                    case 2: ModifyZ = data; break;
+                    case 3: ModifyW = data; break;
+                    default:
+                        throw new System.IndexOutOfRangeException(string.Format("Invalid Vec3Index index addressed: {0}!", index));
+                }
+            }
+
+            public void ApplyModifyData(ref float data)
+            {
+                if (Modify)
+                {
+                    data = ModifyX.ApplyData(data);
+                }
+            }
+
+            public void ApplyModifyData(ref Vector2 data)
+            {
+                if (Modify)
+                {
+                    var oldData = data;
+                    data.x = ModifyX.ApplyData(oldData);
+                    data.y = ModifyY.ApplyData(oldData);
+                }
+            }
+
+            public void ApplyModifyData(ref Vector3 data)
+            {
+                if (Modify)
+                {
+                    var oldData = data;
+                    data.x = ModifyX.ApplyData(oldData);
+                    data.y = ModifyY.ApplyData(oldData);
+                    data.z = ModifyZ.ApplyData(oldData);
+                }
+            }
+
+            public void ApplyModifyData(ref Vector4 data)
+            {
+                if (Modify)
+                {
+                    var oldData = data;
+                    data.x = ModifyX.ApplyData(oldData);
+                    data.y = ModifyY.ApplyData(oldData);
+                    data.z = ModifyZ.ApplyData(oldData);
+                    data.w = ModifyW.ApplyData(oldData);
+                }
+            }
+
+            public void ApplyModifyData(ref Vector4Int data)
+            {
+                if (Modify)
+                {
+                    var oldData = data;
+                    data.x = ModifyX.ApplyData(oldData);
+                    data.y = ModifyY.ApplyData(oldData);
+                    data.z = ModifyZ.ApplyData(oldData);
+                    data.w = ModifyW.ApplyData(oldData);
                 }
             }
         }
@@ -204,8 +547,7 @@ namespace RenderDocPlugins
                     var blockStr = str[index].Trim();
                     if (!string.IsNullOrEmpty(blockStr))
                     {
-                        int val;
-                        if (int.TryParse(blockStr, out val))
+                        if (int.TryParse(blockStr, out int val))
                         {
                             return val;
                         }
@@ -220,11 +562,11 @@ namespace RenderDocPlugins
                     Vector3 data = defaultVal;
                     for (int i = 0; i < 3; ++i)
                     {
-                        var blockStr = str[vec3Index[i]].Trim();
+                        int interIndex = vec3Index[i];
+                        var blockStr = str[interIndex].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
                         {
-                            float val;
-                            if (float.TryParse(blockStr, out val))
+                            if (float.TryParse(blockStr, out float val))
                             {
                                 if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
@@ -250,11 +592,11 @@ namespace RenderDocPlugins
                     Vector4 data = defaultVal;
                     for (int i = 0; i < 4; ++i)
                     {
-                        var blockStr = str[vec4Index[i]].Trim();
+                        int interIndex = vec4Index[i];
+                        var blockStr = str[interIndex].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
                         {
-                            float val;
-                            if (float.TryParse(blockStr, out val))
+                            if (float.TryParse(blockStr, out float val))
                             {
                                 if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
@@ -269,6 +611,29 @@ namespace RenderDocPlugins
                 }
                 return defaultVal;
             }
+            public static float GetDataFloat(in Vec4Index vec4Index, string[] str, float defaultVal)
+            {
+                if (vec4Index.GetValidComponentLength() >= 1)
+                {
+                    float data = defaultVal;
+                    int interIndex = vec4Index[0];
+                    var blockStr = str[interIndex].Trim();
+                    if (!string.IsNullOrEmpty(blockStr))
+                    {
+                        if (float.TryParse(blockStr, out float val))
+                        {
+                            if (float.IsNaN(val) || float.IsInfinity(val))
+                            {
+                                Debug.LogError($"IsNaN Or IsInfinity {blockStr}");
+                                val = 0.0f;
+                            }
+                            data = val;
+                        }
+                    }
+                    return data;
+                }
+                return defaultVal;
+            }
             public static Vector2 GetDataVertor2(in Vec4Index vec4Index, string[] str, Vector2 defaultVal)
             {
                 if (vec4Index.GetValidComponentLength() >= 2)
@@ -276,11 +641,11 @@ namespace RenderDocPlugins
                     Vector2 data = defaultVal;
                     for (int i = 0; i < 2; ++i)
                     {
-                        var blockStr = str[vec4Index[i]].Trim();
+                        int interIndex = vec4Index[i];
+                        var blockStr = str[interIndex].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
                         {
-                            float val;
-                            if (float.TryParse(blockStr, out val))
+                            if (float.TryParse(blockStr, out float val))
                             {
                                 if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
@@ -302,11 +667,11 @@ namespace RenderDocPlugins
                     Vector3 data = defaultVal;
                     for (int i = 0; i < 3; ++i)
                     {
-                        var blockStr = str[vec4Index[i]].Trim();
+                        int interIndex = vec4Index[i];
+                        var blockStr = str[interIndex].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
                         {
-                            float val;
-                            if (float.TryParse(blockStr, out val))
+                            if (float.TryParse(blockStr, out float val))
                             {
                                 if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
@@ -328,11 +693,11 @@ namespace RenderDocPlugins
                     Vector4Int data = defaultVal;
                     for (int i = 0; i < 4; ++i)
                     {
-                        var blockStr = str[vec4Index[i]].Trim();
+                        int interIndex = vec4Index[i];
+                        var blockStr = str[interIndex].Trim();
                         if (!string.IsNullOrEmpty(blockStr))
                         {
-                            int val;
-                            if (int.TryParse(blockStr, out val))
+                            if (int.TryParse(blockStr, out int val))
                             {
                                 if (float.IsNaN(val) || float.IsInfinity(val))
                                 {
@@ -347,81 +712,96 @@ namespace RenderDocPlugins
                 }
                 return defaultVal;
             }
+
             #endregion
 
             public CSVIndexData(Allocator allocator)
             {
                 VertexNumIndex = -1;
                 IndicesMumIndex = -1;
-                Pos = new Vec3Index();
-                Normal = new Vec3Index();
-                Tangent = new Vec4Index();
-                Color = new Vec4Index();
-                Texcoord = new NativeArray<Vec4Index>(k_MaxTexcoord, allocator);
-                BlendWeight = new Vec4Index();
-                BlendIndices = new Vec4Index();
+                Pos = new();
+                Normal = new();
+                Tangent = new();
+                Color = new();
+                Texcoord = new(k_MaxTexcoord, allocator);
+                BlendWeight = new();
+                BlendIndices = new();
 
                 Reset();
             }
 
-            public void SetPos(int index, int pos)
+            public void SetPos(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (Pos.IsValidIndex(index))
                 {
-                    Pos[index] = pos;
+                    Pos[index] = csvPos;
+                    Pos.Modify = data.Modify;
+                    Pos.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
-            public void SetNormal(int index, int pos)
+            public void SetNormal(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (Normal.IsValidIndex(index))
                 {
-                    Normal[index] = pos;
+                    Normal[index] = csvPos;
+                    Normal.Modify = data.Modify;
+                    Normal.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
-            public void SetTangent(int index, int pos)
+            public void SetTangent(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (Tangent.IsValidIndex(index))
                 {
-                    Tangent[index] = pos;
+                    Tangent[index] = csvPos;
+                    Tangent.Modify = data.Modify;
+                    Tangent.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
-            public void SetColor(int index, int pos)
+            public void SetColor(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (Color.IsValidIndex(index))
                 {
-                    Color[index] = pos;
+                    Color[index] = csvPos;
+                    Color.Modify = data.Modify;
+                    Color.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
-            public void SetTexcoord(int texIndex, int index, int pos)
+            public void SetTexcoord(int texIndex, int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (texIndex >= 0 && texIndex < Texcoord.Length)
                 {
                     if (Texcoord[texIndex].IsValidIndex(index))
                     {
                         var texcorrd = Texcoord[texIndex];
-                        texcorrd[index] = pos;
+                        texcorrd[index] = csvPos;
+                        texcorrd.Modify = data.Modify;
+                        texcorrd.SetModifyData(index, data.GetModifyData(index));
                         Texcoord[texIndex] = texcorrd;
                     }
                 }
             }
 
-            public void SetBlendWeight(int index, int pos)
+            public void SetBlendWeight(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (BlendWeight.IsValidIndex(index))
                 {
-                    BlendWeight[index] = pos;
+                    BlendWeight[index] = csvPos;
+                    BlendWeight.Modify = data.Modify;
+                    BlendWeight.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
-            public void SetBlendIndices(int index, int pos)
+            public void SetBlendIndices(int index, int csvPos, in VertexAttributeMapping data)
             {
                 if (BlendIndices.IsValidIndex(index))
                 {
-                    BlendIndices[index] = pos;
+                    BlendIndices[index] = csvPos;
+                    BlendIndices.Modify = data.Modify;
+                    BlendIndices.SetModifyData(index, data.GetModifyData(index));
                 }
             }
 
@@ -443,7 +823,7 @@ namespace RenderDocPlugins
                 if (BlendWeight.IsValidAllComponent()) { ++count; }
                 if (BlendIndices.IsValidAllComponent()) { ++count; }
 
-                NativeArray<VertexAttributeDescriptor> array = new NativeArray<VertexAttributeDescriptor>(count, allocator);
+                NativeArray<VertexAttributeDescriptor> array = new(count, allocator);
                 count = 0;
                 if (Pos.IsValidAllComponent())
                 {
@@ -517,7 +897,6 @@ namespace RenderDocPlugins
                         4,
                         0
                         );
-                    ++count;
                 }
                 return array;
             }
@@ -547,39 +926,42 @@ namespace RenderDocPlugins
 
             public void Dispose()
             {
-                Texcoord.Dispose();
+                if (Texcoord.IsCreated)
+                {
+                    Texcoord.Dispose();
+                }
             }
 
             public static VertexAttribute GetTexcoordAttribute(int index)
             {
-                switch (index)
+                return index switch
                 {
-                    case 0: return VertexAttribute.TexCoord0;
-                    case 1: return VertexAttribute.TexCoord1;
-                    case 2: return VertexAttribute.TexCoord2;
-                    case 3: return VertexAttribute.TexCoord3;
-                    case 4: return VertexAttribute.TexCoord4;
-                    case 5: return VertexAttribute.TexCoord5;
-                    case 6: return VertexAttribute.TexCoord6;
-                    case 7: return VertexAttribute.TexCoord7;
-                }
-                throw new System.IndexOutOfRangeException();
+                    0 => VertexAttribute.TexCoord0,
+                    1 => VertexAttribute.TexCoord1,
+                    2 => VertexAttribute.TexCoord2,
+                    3 => VertexAttribute.TexCoord3,
+                    4 => VertexAttribute.TexCoord4,
+                    5 => VertexAttribute.TexCoord5,
+                    6 => VertexAttribute.TexCoord6,
+                    7 => VertexAttribute.TexCoord7,
+                    _ => throw new System.IndexOutOfRangeException(),
+                };
             }
 
             public static int GetTexcoordIndex(VertexAttribute attr)
             {
-                switch (attr)
+                return attr switch
                 {
-                    case VertexAttribute.TexCoord0: return 0;
-                    case VertexAttribute.TexCoord1: return 1;
-                    case VertexAttribute.TexCoord2: return 2;
-                    case VertexAttribute.TexCoord3: return 3;
-                    case VertexAttribute.TexCoord4: return 4;
-                    case VertexAttribute.TexCoord5: return 5;
-                    case VertexAttribute.TexCoord6: return 6;
-                    case VertexAttribute.TexCoord7: return 7;
-                }
-                throw new System.IndexOutOfRangeException();
+                    VertexAttribute.TexCoord0 => 0,
+                    VertexAttribute.TexCoord1 => 1,
+                    VertexAttribute.TexCoord2 => 2,
+                    VertexAttribute.TexCoord3 => 3,
+                    VertexAttribute.TexCoord4 => 4,
+                    VertexAttribute.TexCoord5 => 5,
+                    VertexAttribute.TexCoord6 => 6,
+                    VertexAttribute.TexCoord7 => 7,
+                    _ => throw new System.IndexOutOfRangeException(),
+                };
             }
         }
 
@@ -646,15 +1028,15 @@ namespace RenderDocPlugins
             private bool dispose;
             private Mesh.MeshDataArray meshDataArray;
             private Mesh.MeshData meshData;
-            private int indexCount;
-            private int vertexIndexBase;
+            private readonly int indexCount;
+            private readonly int vertexIndexBase;
             private NativeArray<byte> vertexDataSet;
             private int vertexDataSetCount;
             private NativeArray<byte> indexDataSet;
             private int indexDataSetCount;
-            private int offsetMappingBase;
+            private readonly int offsetMappingBase;
             private NativeArray<int> offsetMapping;
-            private int oneVertexDataTotalSize;
+            private readonly int oneVertexDataTotalSize;
 
             public VertexDataList(NativeArray<VertexAttributeDescriptor> vertexDesc, int vertexCount, int indexCount, int vertexIndexBase, Allocator allocator)
             {
@@ -847,13 +1229,16 @@ namespace RenderDocPlugins
 
             public void ApplyToMesh(Mesh mesh, in CSVMeshInfo csvMeshInfo)
             {
+                var flags = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds;
                 meshData.subMeshCount = csvMeshInfo.SubMeshCount;
                 for (int i = 0; i < csvMeshInfo.SubMeshCount; ++i)
                 {
-                    meshData.SetSubMesh(i, csvMeshInfo.SubMeshDescArray[i]);
+                    // flags do not set MeshUpdateFlags.DontRecalculateBounds, otherwise unity will crash
+                    meshData.SetSubMesh(i, csvMeshInfo.SubMeshDescArray[i], flags);
                 }
-                Mesh.ApplyAndDisposeWritableMeshData(meshDataArray, mesh);
-                mesh.RecalculateBounds();
+                flags &= MeshUpdateFlags.DontRecalculateBounds;
+                Mesh.ApplyAndDisposeWritableMeshData(meshDataArray, mesh, flags);
+                mesh.RecalculateBounds(flags);
                 dispose = true;
             }
 
@@ -893,10 +1278,12 @@ namespace RenderDocPlugins
                 }
 
                 bool succeed = false;
-                var mesh = new Mesh();
-                mesh.name = string.Empty;
-                CSVIndexData csvIndexData = new CSVIndexData();
-                CSVMeshInfo csvMeshInfo = new CSVMeshInfo();
+                var mesh = new Mesh
+                {
+                    name = string.Empty
+                };
+                CSVIndexData csvIndexData = new();
+                CSVMeshInfo csvMeshInfo = new();
                 try
                 {
                     csvIndexData = new CSVIndexData(allocator);
@@ -916,6 +1303,7 @@ namespace RenderDocPlugins
                     var vertexDataList = new VertexDataList(vertexAttrArray, csvMeshInfo.VertexCount, csvMeshInfo.IndexCount, csvMeshInfo.BaseVertexIndex, allocator);
                     try
                     {
+                        // for csv every line set vertexDataList
                         for (int i = 0; i < strReaderArray.Length; ++i)
                         {
                             var subMeshDesc = csvMeshInfo.SubMeshDescArray[i];
@@ -923,15 +1311,15 @@ namespace RenderDocPlugins
                             var line = strReader.ReadLine();
                             while (!string.IsNullOrEmpty(line))
                             {
-                                SetVertexData(line, in csvIndexData, in subMeshDesc, ref vertexDataList);
+                                SetVertexDataOneLine(line, in csvIndexData, in subMeshDesc, ref vertexDataList);
                                 line = strReader.ReadLine();
                             }
                         }
-                        //if (!vertexDataList.IsSetVertexDataFinish())
-                        //{
-                        //    UnityEngine.Debug.LogError($"not finish set Vertex Data. VertexCount:{vertexDataList.GetVertexCount()} SetCount:{vertexDataList.HasSetVertexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetData()}");
-                        //    return;
-                        //}
+                        if (!vertexDataList.IsSetVertexDataFinish())
+                        {
+                            UnityEngine.Debug.LogError($"not finish set Vertex Data. VertexCount:{vertexDataList.GetVertexCount()} SetCount:{vertexDataList.HasSetVertexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetVertexData()}");
+                            return;
+                        }
                         if (!vertexDataList.IsSetIndexDataFinish())
                         {
                             UnityEngine.Debug.LogError($"not finish set Index Data. IndexCount:{vertexDataList.GetIndexCount()} SetCount:{vertexDataList.HasSetIndexDataCount()} FirstNotSet:{vertexDataList.FindFirstNotSetIndexData()}");
@@ -942,18 +1330,42 @@ namespace RenderDocPlugins
                             vertexDataList.FlipVertexWindingOrder();
                         }
                         vertexDataList.ApplyToMesh(mesh, csvMeshInfo);
-                        if ((genSetting.flags & Flags.AutoCalcNormalIfNotExist) != 0)
                         {
-                            if (!csvIndexData.Normal.IsValidAllComponent())
+                            bool calcNormal = false;
+                            switch (genSetting.calcNormal)
                             {
-                                mesh.RecalculateNormals();
+                                case AutoCalcMode.IfNotExist:
+                                    if (!csvIndexData.Normal.IsValidAllComponent())
+                                    {
+                                        calcNormal = true;
+                                    }
+                                    break;
+                                case AutoCalcMode.Force:
+                                    calcNormal = true;
+                                    break;
+                            }
+                            if (calcNormal)
+                            {
+                                mesh.RecalculateNormals(MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontNotifyMeshUsers);
                             }
                         }
-                        if ((genSetting.flags & Flags.AutoCalcTangentIfNotExist) != 0)
                         {
-                            if (!csvIndexData.Tangent.IsValidAllComponent())
+                            bool calcTangent = false;
+                            switch (genSetting.calcTangent)
                             {
-                                mesh.RecalculateTangents();
+                                case AutoCalcMode.IfNotExist:
+                                    if (!csvIndexData.Tangent.IsValidAllComponent())
+                                    {
+                                        calcTangent = true;
+                                    }
+                                    break;
+                                case AutoCalcMode.Force:
+                                    calcTangent = true;
+                                    break;
+                            }
+                            if (calcTangent)
+                            {
+                                mesh.RecalculateTangents(MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontNotifyMeshUsers);
                             }
                         }
                         if ((genSetting.flags & Flags.OptimizesRendering) != 0)
@@ -965,6 +1377,10 @@ namespace RenderDocPlugins
                             MeshUtility.SetMeshCompression(mesh, genSetting.compression);
                         }
                     }
+                    catch (System.Exception e)
+                    {
+                        UnityEngine.Debug.LogError(e);
+                    }
                     finally
                     {
                         vertexAttrArray.Dispose();
@@ -975,6 +1391,10 @@ namespace RenderDocPlugins
                     AssetDatabase.ImportAsset(targetAssetPath);
                     Selection.activeObject = mesh;
                     EditorGUIUtility.PingObject(mesh);
+                }
+                catch (System.Exception e)
+                {
+                    UnityEngine.Debug.LogError(e);
                 }
                 finally
                 {
@@ -1004,7 +1424,7 @@ namespace RenderDocPlugins
             }
         }
 
-        private static void SetVertexData(string line, in CSVIndexData indexData, in SubMeshDescriptor subMeshDesc, ref VertexDataList vertexDataList)
+        private static void SetVertexDataOneLine(string line, in CSVIndexData indexData, in SubMeshDescriptor subMeshDesc, ref VertexDataList vertexDataList)
         {
             if (indexData.VertexNumIndex == -1)
             {
@@ -1030,7 +1450,7 @@ namespace RenderDocPlugins
             {
                 return;
             }
-            vertexIndex = vertexIndex - vertexDataList.GetVertexIndexBase();
+            vertexIndex -= vertexDataList.GetVertexIndexBase();
             if (vertexIndex >= vertexDataList.GetVertexCount())
             {
                 return;
@@ -1041,36 +1461,42 @@ namespace RenderDocPlugins
                 if (indexData.Pos.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor3(in indexData.Pos, strArr, Vector3.zero);
+                    indexData.Pos.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector3>(vertexIndex, VertexAttribute.Position, data);
                 }
 
                 if (indexData.Normal.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor3(in indexData.Normal, strArr, Vector3.zero);
+                    indexData.Normal.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector3>(vertexIndex, VertexAttribute.Normal, data);
                 }
 
                 if (indexData.Tangent.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor4(in indexData.Tangent, strArr, Vector4.zero);
+                    indexData.Tangent.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector4>(vertexIndex, VertexAttribute.Tangent, data);
                 }
 
                 if (indexData.Color.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor4(in indexData.Color, strArr, Vector4.zero);
+                    indexData.Color.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector4>(vertexIndex, VertexAttribute.Color, data);
                 }
 
                 if (indexData.BlendWeight.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor4(in indexData.BlendWeight, strArr, Vector4.zero);
+                    indexData.BlendWeight.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector4>(vertexIndex, VertexAttribute.BlendWeight, data);
                 }
 
                 if (indexData.BlendIndices.IsValidAllComponent())
                 {
                     var data = CSVIndexData.GetDataVertor4Int(in indexData.BlendIndices, strArr, Vector4Int.zero);
+                    indexData.BlendIndices.ApplyModifyData(ref data);
                     vertexDataList.SetVertexData<Vector4Int>(vertexIndex, VertexAttribute.BlendIndices, data);
                 }
 
@@ -1081,21 +1507,31 @@ namespace RenderDocPlugins
                     {
                         switch (len)
                         {
+                            case 1:
+                                {
+                                    var data = CSVIndexData.GetDataFloat(indexData.Texcoord[i], strArr, 0.0f);
+                                    indexData.Texcoord[i].ApplyModifyData(ref data);
+                                    vertexDataList.SetVertexData<float>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
+                                }
+                                break;
                             case 2:
                                 {
                                     var data = CSVIndexData.GetDataVertor2(indexData.Texcoord[i], strArr, Vector2.zero);
+                                    indexData.Texcoord[i].ApplyModifyData(ref data);
                                     vertexDataList.SetVertexData<Vector2>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
                             case 3:
                                 {
                                     var data = CSVIndexData.GetDataVertor3(indexData.Texcoord[i], strArr, Vector3.zero);
+                                    indexData.Texcoord[i].ApplyModifyData(ref data);
                                     vertexDataList.SetVertexData<Vector3>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
                             case 4:
                                 {
                                     var data = CSVIndexData.GetDataVertor4(indexData.Texcoord[i], strArr, Vector4.zero);
+                                    indexData.Texcoord[i].ApplyModifyData(ref data);
                                     vertexDataList.SetVertexData<Vector4>(vertexIndex, CSVIndexData.GetTexcoordAttribute(i), data);
                                 }
                                 break;
@@ -1136,10 +1572,10 @@ namespace RenderDocPlugins
                 return false;
             }
 
-            NativeArray<CSVSubMeshInfo> subMeshInfoArray = new NativeArray<CSVSubMeshInfo>(strReader.Length, Allocator.Temp);
+            NativeArray<CSVSubMeshInfo> subMeshInfoArray = new(strReader.Length, Allocator.Temp);
             for (int i = 0; i < strReader.Length; ++i)
             {
-                CSVSubMeshInfo subMeshInfo = new CSVSubMeshInfo();
+                CSVSubMeshInfo subMeshInfo = new();
                 GetCSVSubMeshInfo(strReader[i], csvIndexData, ref subMeshInfo);
                 subMeshInfoArray[i] = subMeshInfo;
             }
@@ -1163,8 +1599,7 @@ namespace RenderDocPlugins
                 var curStr = CSV.GetCSVString(line, indicesNumIndex);
                 if (!string.IsNullOrEmpty(curStr))
                 {
-                    int val;
-                    if (int.TryParse(curStr.Trim(), out val))
+                    if (int.TryParse(curStr.Trim(), out int val))
                     {
                         minTriangleIndex = Mathf.Min(val, minTriangleIndex);
                         maxTriangleIndex = Mathf.Max(val, maxTriangleIndex);
@@ -1173,8 +1608,7 @@ namespace RenderDocPlugins
                 curStr = CSV.GetCSVString(line, vertexNumIndex);
                 if (!string.IsNullOrEmpty(curStr))
                 {
-                    int val;
-                    if (int.TryParse(curStr.Trim(), out val))
+                    if (int.TryParse(curStr.Trim(), out int val))
                     {
                         minVertexIndex = Mathf.Min(val, minVertexIndex);
                         maxVertexIndex = Mathf.Max(val, maxVertexIndex);
@@ -1210,8 +1644,7 @@ namespace RenderDocPlugins
                 var curAttr = VertexAttribute.Position;
                 bool findAttr = false;
                 var cur = strArr[i].Trim();
-                string compString = string.Empty;
-                var headerString = RenderDocCSV.ParseVertexAttrName(cur, out compString);
+                var headerString = RenderDocCSV.ParseVertexAttrName(cur, out string compString);
 
                 if (RenderDocCSV.ParseTriangleIndices(headerString))
                 {
@@ -1225,13 +1658,15 @@ namespace RenderDocPlugins
                     continue;
                 }
 
-
+                VertexAttributeMapping vertexMapping = new()
+                {
+                    Enable = false
+                };
                 if (mappingDict != null)
                 {
-                    VertexAttributeMapping vertexMapping;
                     if (mappingDict.TryGetValue(headerString, out vertexMapping))
                     {
-                        if (vertexMapping.Disable)
+                        if (!vertexMapping.Enable)
                         {
                             // Ignore
                             continue;
@@ -1255,16 +1690,16 @@ namespace RenderDocPlugins
                 switch (curAttr)
                 {
                     case VertexAttribute.Position:
-                        data.SetPos(compIndex, i);
+                        data.SetPos(compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.Normal:
-                        data.SetNormal(compIndex, i);
+                        data.SetNormal(compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.Tangent:
-                        data.SetTangent(compIndex, i);
+                        data.SetTangent(compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.Color:
-                        data.SetColor(compIndex, i);
+                        data.SetColor(compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.TexCoord0:
                     case VertexAttribute.TexCoord1:
@@ -1274,13 +1709,13 @@ namespace RenderDocPlugins
                     case VertexAttribute.TexCoord5:
                     case VertexAttribute.TexCoord6:
                     case VertexAttribute.TexCoord7:
-                        data.SetTexcoord(curAttr - VertexAttribute.TexCoord0, compIndex, i);
+                        data.SetTexcoord(curAttr - VertexAttribute.TexCoord0, compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.BlendWeight:
-                        data.SetBlendWeight(compIndex, i);
+                        data.SetBlendWeight(compIndex, i, vertexMapping);
                         break;
                     case VertexAttribute.BlendIndices:
-                        data.SetBlendIndices(compIndex, i);
+                        data.SetBlendIndices(compIndex, i, vertexMapping);
                         break;
                     default:
                         UnityEngine.Debug.LogError($"Not support: {curAttr}");

@@ -6,11 +6,6 @@ using System.Runtime.InteropServices;
 
 namespace RenderDocPlugins
 {
-    public interface ICBufferC
-    {
-
-    }
-
     [ExecuteInEditMode]
     public class CSVMaterialConstantBuffer : MonoBehaviour
     {

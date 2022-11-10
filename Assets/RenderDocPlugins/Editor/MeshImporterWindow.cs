@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
-using Unity.Collections.LowLevel.Unsafe;
 using UnityEditor;
 
 namespace RenderDocPlugins
@@ -16,15 +15,28 @@ namespace RenderDocPlugins
         private const int k_WindowWidth = 500;
         private const int k_WindowHeight = 600;
 
+        static class Texts
+        {
+            public static readonly GUIContent FlipVertexWindingOrder = new("Flip Vertex Winding Order", "vertices of triangles in counter-clockwise order (or in clockwise order in DirectX)");
+            public static readonly GUIContent OptimizeMesh = new("Optimize Mesh", "Reorder vertices and/or polygons for better GPU performance.");
+            public static readonly GUIContent ReadWirteEnabled = new("Read/Write Enabled", "Allow vertices and indices to be accessed from script.");
+            public static readonly GUIContent AutoCalcNormal = new("Auto Calculate Normal Mode", "Source of mesh normals. If a mesh has no normals, they will be calculated instead.");
+            public static readonly GUIContent AutoCalcTangen = new("Auto Calculate Tangent Mode", "Source of mesh tangents. If a mesh has no tangents, they will be calculated instead.");
+            public static readonly GUIContent MeshCompression = new("Mesh Compression", "Higher compression ratio means lower mesh precision. If enabled, the mesh bounds and a lower bit depth per component are used to compress the mesh data.");
+
+            public static readonly GUIContent PresetContent = EditorGUIUtility.TrTextContent("Preset", "Apply preset already saved.");
+        }
 
         static class Styles
         {
             public static readonly GUIStyle dropdown = "Dropdown";
+            public static readonly GUIContent TitleIcon = EditorGUIUtility.IconContent("d_P4_Local");
+
 
             private static Texture2D s_InfoIcon;
             private static Texture2D s_WarningIcon;
             private static Texture2D s_ErrorIcon;
-            internal static Texture2D infoIcon
+            internal static Texture2D InfoIcon
             {
                 get
                 {
@@ -33,7 +45,7 @@ namespace RenderDocPlugins
                     return s_InfoIcon;
                 }
             }
-            internal static Texture2D warningIcon
+            internal static Texture2D WarningIcon
             {
                 get
                 {
@@ -43,7 +55,7 @@ namespace RenderDocPlugins
                 }
             }
 
-            internal static Texture2D errorIcon
+            internal static Texture2D ErrorIcon
             {
                 get
                 {
@@ -55,41 +67,26 @@ namespace RenderDocPlugins
 
             internal static string GetHelpIcon(MessageType type)
             {
-                switch (type)
+                return type switch
                 {
-                    case MessageType.Info:
-                        return "console.infoicon";
-                    case MessageType.Warning:
-                        return "console.warnicon";
-                    case MessageType.Error:
-                        return "console.erroricon";
-                }
-                return string.Empty;
+                    MessageType.Info => "console.infoicon",
+                    MessageType.Warning => "console.warnicon",
+                    MessageType.Error => "console.erroricon",
+                    _ => string.Empty,
+                };
             }
 
-            static GUIContent s_PresetContent;
-            internal static GUIContent PresetContent
-            {
-                get
-                {
-                    if (s_PresetContent == null)
-                        s_PresetContent = EditorGUIUtility.TrTextContent("Preset", "Apply preset already saved.");
-                    return s_PresetContent;
-                }
-            }
+
+
         }
 
         [System.Serializable]
-        struct VertexAttrSetting
+        class VertexAttrSetting
         {
-            [SerializeField]
-            public bool Ignore;
-            [SerializeField]
-            public string CSVName;
             [SerializeField]
             public int CompCount;
             [SerializeField]
-            public UnityEngine.Rendering.VertexAttribute Attr;
+            public VertexAttributeMapping Mapping;
         }
 
         [SerializeField]
@@ -111,13 +108,13 @@ namespace RenderDocPlugins
         private bool m_FlipVertexWindingOrder = false;
 
         [SerializeField]
-        private List<VertexAttrSetting> m_VertexAttrList = new List<VertexAttrSetting>();
+        private List<VertexAttrSetting> m_VertexAttrList = new();
 
         [SerializeField]
-        private bool m_AutoCalcNormalIfNotExist = false;
+        private CSVToMeshGenerator.AutoCalcMode m_AutoCalcNormal = CSVToMeshGenerator.AutoCalcMode.NotCalc;
 
         [SerializeField]
-        private bool m_AutoCalcTangentIfNotExist = false;
+        private CSVToMeshGenerator.AutoCalcMode m_AutoCalcTangent = CSVToMeshGenerator.AutoCalcMode.NotCalc;
 
         [SerializeField]
         private bool m_OptimizesRendering = true;
@@ -129,7 +126,7 @@ namespace RenderDocPlugins
         private ModelImporterMeshCompression m_MeshCompression = ModelImporterMeshCompression.Off;
 
         // Overlay a notification message over the window.
-        const double kWarningFadeoutWait = 4;
+        //const double kWarningFadeoutWait = 4;
         const double kWarningFadeoutTime = 1;
 
         internal GUIContent m_MessageNotification = null;
@@ -139,7 +136,7 @@ namespace RenderDocPlugins
         static MeshImporterWindow s_Instance;
         public static MeshImporterWindow Instance { get { return s_Instance; } }
 
-        [MenuItem("RenderDocPlugins/Import Mesh From CSV")]
+        [UnityEditor.MenuItem("RenderDocPlugins/Import Mesh From CSV")]
         public static void DoImportMeshFromCSV()
         {
             var win = EditorWindow.GetWindow<MeshImporterWindow>();
@@ -175,158 +172,267 @@ namespace RenderDocPlugins
             }
 
             m_ScrollPos = EditorGUILayout.BeginScrollView(m_ScrollPos);
-
-            GUILayout.Space(10f);
-
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                EditorGUILayout.BeginHorizontal();
-                {
-                    GUILayout.Label("Sub mesh count", GUILayout.ExpandWidth(false));
-                    var count = EditorGUILayout.IntSlider(m_SubMeshCount, k_MinSubMeshCount, k_MaxSubMeshCount);
-                    if (count != m_SubMeshCount)
-                    {
-                        m_SubMeshCount = count;
-                        TrimSourcePathFromSubMeshCount();
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-
                 GUILayout.Space(10f);
 
-                for (int subMeshIndex = 0; subMeshIndex < m_SubMeshCount; ++subMeshIndex)
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
                 {
-                    if (subMeshIndex != 0)
-                    {
-                        GUILayout.Space(5f);
-                    }
                     EditorGUILayout.BeginHorizontal();
                     {
-                        GUILayout.Label($"SubMesh #{subMeshIndex + 1} CSV", GUILayout.ExpandWidth(false));
-                        GUILayout.Space(10f);
-                        if (string.IsNullOrEmpty(m_SourcePath[subMeshIndex]))
+                        GUILayout.Label("Sub mesh count", GUILayout.ExpandWidth(false));
+                        var count = EditorGUILayout.IntSlider(m_SubMeshCount, k_MinSubMeshCount, k_MaxSubMeshCount);
+                        if (count != m_SubMeshCount)
                         {
-                            GUILayout.FlexibleSpace();
-                            GUILayout.Label("Have not selected source csv file. Or you can drop csv file to here.", GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
-                            GUILayout.FlexibleSpace();
-                        }
-                        else
-                        {
-                            GUILayout.Label(m_SourcePath[subMeshIndex], GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
-                        }
-                        GUILayout.Space(10f);
-
-                        GUILayout.FlexibleSpace();
-
-                        if (GUILayout.Button("Select File...", GUILayout.ExpandWidth(false)))
-                        {
-                            string fileSelected = EditorUtility.OpenFilePanelWithFilters("Select source csv file", string.IsNullOrEmpty(m_SourcePath[subMeshIndex]) ? Application.dataPath : m_SourcePath[subMeshIndex], new string[] { "csv files", "csv", "All files", "*" });
-                            if (!string.IsNullOrEmpty(fileSelected))
-                            {
-                                DoChangeSourceCSV(subMeshIndex, fileSelected);
-                            }
+                            m_SubMeshCount = count;
+                            TrimSourcePathFromSubMeshCount();
                         }
                     }
                     EditorGUILayout.EndHorizontal();
 
-                    HandleDragAndDropGUI(GUILayoutUtility.GetLastRect(), subMeshIndex);
-
-                }
-            }
-            EditorGUILayout.EndVertical();
-
-            if (!string.IsNullOrEmpty(m_ErrorMessage))
-            {
-                EditorGUILayout.HelpBox(m_ErrorMessage, MessageType.Error);
-            }
-
-            GUILayout.Space(10f);
-
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
-            {
-                GUILayout.FlexibleSpace();
-                EditorGUILayout.BeginHorizontal();
-                {
-                    GUILayout.Label("Destination Mesh", GUILayout.ExpandWidth(false));
-                    GUILayout.Space(10f);
-                    m_DestPath = GUILayout.TextField(m_DestPath);
                     GUILayout.Space(10f);
 
-                    if (GUILayout.Button("Select Path...", GUILayout.ExpandWidth(false)))
+                    for (int subMeshIndex = 0; subMeshIndex < m_SubMeshCount; ++subMeshIndex)
                     {
-                        string fileSelected = EditorUtility.SaveFilePanelInProject("Select destination mesh file", "New Mesh", "asset", "file to save");
-                        if (!string.IsNullOrEmpty(fileSelected))
+                        if (subMeshIndex != 0)
                         {
-                            DoChangeDestMesh(fileSelected);
+                            GUILayout.Space(5f);
                         }
-                        GUIUtility.ExitGUI();
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-                GUILayout.FlexibleSpace();
-            }
-            EditorGUILayout.EndVertical();
-
-            GUILayout.Space(10f);
-
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
-            {
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Vertex Attribute Mapping (Determined by the CSV of the first submesh)");
-                GUILayout.FlexibleSpace();
-                if (m_VertexAttrList.Count > 0)
-                {
-                    DoPresetsDropDown();
-                }
-                EditorGUILayout.EndHorizontal();
-
-                if (m_VertexAttrList.Count <= 0)
-                {
-                    GUILayout.Label("Waiting set CSV File...");
-                }
-                else
-                {
-                    for (int i = 0; i < m_VertexAttrList.Count; ++i)
-                    {
-                        bool changed = false;
-                        var data = m_VertexAttrList[i];
                         EditorGUILayout.BeginHorizontal();
-                        var newIgnore = EditorGUILayout.ToggleLeft($"{data.CSVName} ({data.CompCount})", !data.Ignore, GUILayout.ExpandWidth(false));
-                        if (newIgnore == data.Ignore)
                         {
-                            data.Ignore = !newIgnore;
-                            changed = true;
-                        }
-                        EditorGUI.BeginDisabledGroup(data.Ignore);
-                        var newAttr = (UnityEngine.Rendering.VertexAttribute)EditorGUILayout.EnumPopup(string.Empty, data.Attr, GUILayout.ExpandWidth(false));
-                        EditorGUI.EndDisabledGroup();
-                        if (newAttr != data.Attr)
-                        {
-                            data.Attr = newAttr;
-                            changed = true;
+                            GUILayout.Label($"SubMesh #{subMeshIndex + 1} CSV", GUILayout.ExpandWidth(false));
+                            GUILayout.Space(10f);
+                            if (string.IsNullOrEmpty(m_SourcePath[subMeshIndex]))
+                            {
+                                GUILayout.FlexibleSpace();
+                                GUILayout.Label("Have not selected source csv file. Or you can drop csv file to here.", GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
+                                GUILayout.FlexibleSpace();
+                            }
+                            else
+                            {
+                                GUILayout.Label(m_SourcePath[subMeshIndex], GUILayout.ExpandWidth(false), GUILayout.MinWidth(0f));
+                            }
+                            GUILayout.Space(10f);
+
+                            GUILayout.FlexibleSpace();
+
+                            if (GUILayout.Button("Select File...", GUILayout.ExpandWidth(false)))
+                            {
+                                string fileSelected = EditorUtility.OpenFilePanelWithFilters("Select source csv file", string.IsNullOrEmpty(m_SourcePath[subMeshIndex]) ? Application.dataPath : m_SourcePath[subMeshIndex], new string[] { "csv files", "csv", "All files", "*" });
+                                if (!string.IsNullOrEmpty(fileSelected))
+                                {
+                                    DoChangeSourceCSV(subMeshIndex, fileSelected);
+                                }
+                                EditorGUIUtility.hotControl = 0;
+                                EditorGUIUtility.ExitGUI();
+                            }
                         }
                         EditorGUILayout.EndHorizontal();
-                        if (changed)
-                        {
-                            m_VertexAttrList[i] = data;
-                        }
+
+                        HandleSourceDragAndDropGUI(GUILayoutUtility.GetLastRect(), subMeshIndex);
                     }
                 }
+                EditorGUILayout.EndVertical();
 
+                if (!string.IsNullOrEmpty(m_ErrorMessage))
+                {
+                    EditorGUILayout.HelpBox(m_ErrorMessage, MessageType.Error);
+                }
+
+                GUILayout.Space(10f);
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
+                {
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.BeginHorizontal();
+                    {
+                        GUILayout.Label("Destination Mesh", GUILayout.ExpandWidth(false));
+                        GUILayout.Space(10f);
+                        m_DestPath = GUILayout.TextField(m_DestPath);
+                        GUILayout.Space(10f);
+
+                        if (GUILayout.Button("Select Path...", GUILayout.ExpandWidth(false)))
+                        {
+                            string initPath;
+                            if (!string.IsNullOrEmpty(m_DestPath))
+                            {
+                                initPath = System.IO.Path.GetDirectoryName(m_DestPath);
+                            }
+                            else
+                            {
+                                initPath = Application.dataPath;
+                            }
+                            string fileSelected = EditorUtility.SaveFilePanelInProject("Select destination mesh file", "New Mesh", "asset", "file to save", initPath);
+                            if (!string.IsNullOrEmpty(fileSelected))
+                            {
+                                DoChangeDestMesh(fileSelected);
+                            }
+                            GUIUtility.ExitGUI();
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                    GUILayout.FlexibleSpace();
+                }
+                EditorGUILayout.EndVertical();
+                HandleDestDragAndDropGUI(GUILayoutUtility.GetLastRect());
+
+                GUILayout.Space(10f);
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinHeight(50f));
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Label("Vertex Attribute Mapping (Determined by the CSV of the first submesh)");
+                    GUILayout.FlexibleSpace();
+                    if (m_VertexAttrList.Count > 0)
+                    {
+                        DoPresetsDropDown();
+                    }
+                    EditorGUILayout.EndHorizontal();
+
+                    if (m_VertexAttrList.Count <= 0)
+                    {
+                        GUILayout.Label("Waiting set CSV File...");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < m_VertexAttrList.Count; ++i)
+                        {
+                            var data = m_VertexAttrList[i];
+                            ref var mappingData = ref data.Mapping;
+                            EditorGUILayout.BeginHorizontal();
+                            {
+                                var newEnable = EditorGUILayout.ToggleLeft($"{mappingData.Name} ({data.CompCount})", mappingData.Enable, GUILayout.ExpandWidth(false));
+                                if (newEnable != mappingData.Enable)
+                                {
+                                    mappingData.Enable = newEnable;
+                                }
+                                EditorGUI.BeginDisabledGroup(!mappingData.Enable);
+                                var newAttr = GUIHelper.LayoutEnumPopup(GUIContent.none, mappingData.Attr, GUILayout.ExpandWidth(false));
+                                if (newAttr != mappingData.Attr)
+                                {
+                                    mappingData.Attr = newAttr;
+                                }
+
+                                var newModify = EditorGUILayout.ToggleLeft("Modify", mappingData.Modify, GUILayout.ExpandWidth(false));
+                                if (newModify != mappingData.Modify)
+                                {
+                                    mappingData.Modify = newModify;
+                                }
+                                EditorGUI.EndDisabledGroup();
+
+                            }
+                            EditorGUILayout.EndHorizontal();
+
+                            if (mappingData.Enable && mappingData.Modify)
+                            {
+                                using (new EditorGUILayout.HorizontalScope())
+                                {
+                                    GUILayout.Space(20f);
+                                    EditorGUILayout.BeginVertical();
+                                    {
+                                        EditorGUILayout.BeginVertical();
+                                        {
+                                            const float k_ComponentWidth = 20f;
+                                            float k_SwizzleWidth = GUIHelper.CalcEnumPopupWidth<VertexAttributeMapping.Swizzle>();
+                                            float k_ManipulationWidth = GUIHelper.CalcEnumPopupWidth<VertexAttributeMapping.Manipulation>();
+                                            const float k_Space = 10f;
+
+                                            EditorGUILayout.BeginHorizontal();
+                                            GUIHelper.LayoutTitleDot(EditorStyles.miniBoldLabel);
+                                            GUILayout.Label("Modify", EditorStyles.miniBoldLabel);
+                                            GUILayout.FlexibleSpace();
+                                            EditorGUILayout.EndHorizontal();
+
+                                            EditorGUILayout.BeginHorizontal();
+                                            GUILayout.Space(20f);
+                                            EditorGUILayout.BeginVertical();
+                                            EditorGUILayout.BeginHorizontal();
+                                            {
+                                                EditorGUILayout.BeginVertical(GUILayout.Width(k_ComponentWidth));
+                                                {
+                                                    GUILayout.Label("Comp.", EditorStyles.miniBoldLabel);
+                                                    GUIHelper.LayoutLineHorizontal(1, 0.5f);
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    {
+                                                        GUILayout.Label($"[{VertexAttributeMapping.ComponentName[componentIndex]}]");
+                                                    }
+                                                }
+                                                EditorGUILayout.EndVertical();
+
+
+                                                GUILayout.Space(k_Space);
+
+
+                                                EditorGUILayout.BeginVertical(GUILayout.Width(k_SwizzleWidth));
+                                                {
+                                                    GUILayout.Label("Swizzle", EditorStyles.miniBoldLabel);
+                                                    GUIHelper.LayoutLineHorizontal(1, 0.5f);
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    {
+                                                        ref var modifyData = ref VertexAttributeMapping.GetModifyData(ref mappingData, componentIndex);
+                                                        var newSwizzle = GUIHelper.LayoutEnumPopup(GUIContent.none, modifyData.Swizzle, GUILayout.ExpandWidth(false));
+                                                        if (modifyData.Swizzle != newSwizzle)
+                                                        {
+                                                            modifyData.Swizzle = newSwizzle;
+                                                        }
+                                                    }
+                                                }
+                                                EditorGUILayout.EndVertical();
+
+                                                GUILayout.Space(k_Space);
+
+                                                EditorGUILayout.BeginVertical(GUILayout.Width(k_ManipulationWidth));
+                                                {
+                                                    GUILayout.Label("Operation", EditorStyles.miniBoldLabel);
+                                                    GUIHelper.LayoutLineHorizontal(1, 0.5f);
+
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    {
+                                                        ref var modifyData = ref VertexAttributeMapping.GetModifyData(ref mappingData, componentIndex);
+                                                        var newManipulation = GUIHelper.LayoutEnumPopup(GUIContent.none, modifyData.Manipulation, GUILayout.ExpandWidth(false));
+                                                        if (modifyData.Manipulation != newManipulation)
+                                                        {
+                                                            modifyData.Manipulation = newManipulation;
+                                                        }
+                                                    }
+                                                }
+                                                EditorGUILayout.EndVertical();
+
+                                            }
+                                            EditorGUILayout.EndHorizontal();
+                                            GUIHelper.LayoutLineHorizontal(1.0f, 0.8f);
+                                            EditorGUILayout.EndVertical();
+                                            GUILayout.FlexibleSpace();
+                                            EditorGUILayout.EndHorizontal();
+
+                                        }
+                                        EditorGUILayout.EndVertical();
+                                    }
+                                    EditorGUILayout.EndVertical();
+                                }
+                            }
+                            EditorGUI.EndDisabledGroup();
+
+                            GUILayout.Space(10f);
+
+                        }
+                    }
+
+                }
+                EditorGUILayout.EndVertical();
+
+
+                GUILayout.Space(10f);
+
+                {
+                    m_FlipVertexWindingOrder = EditorGUILayout.ToggleLeft(Texts.FlipVertexWindingOrder, m_FlipVertexWindingOrder, GUILayout.ExpandWidth(false));
+
+                    m_AutoCalcNormal = GUIHelper.LayoutEnumPopup(Texts.AutoCalcNormal, m_AutoCalcNormal, GUILayout.ExpandWidth(false));
+                    m_AutoCalcTangent = GUIHelper.LayoutEnumPopup(Texts.AutoCalcTangen, m_AutoCalcTangent, GUILayout.ExpandWidth(false));
+                    m_OptimizesRendering = EditorGUILayout.ToggleLeft(Texts.OptimizeMesh, m_OptimizesRendering, GUILayout.ExpandWidth(false));
+                    m_ReadWriteEnable = EditorGUILayout.ToggleLeft(Texts.ReadWirteEnabled, m_ReadWriteEnable, GUILayout.ExpandWidth(false));
+                    m_MeshCompression = GUIHelper.LayoutEnumPopup(Texts.MeshCompression, m_MeshCompression, GUILayout.ExpandWidth(false));
+                }
             }
-            EditorGUILayout.EndVertical();
-
-
-            GUILayout.Space(10f);
-
-            m_FlipVertexWindingOrder = EditorGUILayout.ToggleLeft(new GUIContent("Flip Vertex Winding Order", "vertices of triangles in counter-clockwise order (or in clockwise order in DirectX)"), m_FlipVertexWindingOrder, GUILayout.ExpandWidth(false));
-            m_AutoCalcNormalIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate normal if not exist", "Source of mesh normals. If a mesh has no normals, they will be calculated instead."), m_AutoCalcNormalIfNotExist, GUILayout.ExpandWidth(false));
-            m_AutoCalcTangentIfNotExist = EditorGUILayout.ToggleLeft(new GUIContent("Auto calculate tangent if not exist", "Source of mesh tangents. If a mesh has no tangents, they will be calculated instead."), m_AutoCalcTangentIfNotExist, GUILayout.ExpandWidth(false));
-            m_OptimizesRendering = EditorGUILayout.ToggleLeft(new GUIContent("Optimize Mesh", "Reorder vertices and/or polygons for better GPU performance."), m_OptimizesRendering, GUILayout.ExpandWidth(false));
-            m_ReadWriteEnable = EditorGUILayout.ToggleLeft(new GUIContent("Read/Write Enabled", "Allow vertices and indices to be accessed from script."), m_ReadWriteEnable, GUILayout.ExpandWidth(false));
-            m_MeshCompression = (ModelImporterMeshCompression)EditorGUILayout.EnumPopup(new GUIContent("Mesh Compression", "Higher compression ratio means lower mesh precision. If enabled, the mesh bounds and a lower bit depth per component are used to compress the mesh data."), m_MeshCompression, GUILayout.ExpandWidth(false));
-
-
             EditorGUILayout.EndScrollView();
 
             GUILayout.FlexibleSpace();
@@ -336,6 +442,9 @@ namespace RenderDocPlugins
                 if (GUILayout.Button("Generate Mesh", GUILayout.MinHeight(50f)))
                 {
                     DoGenerateMesh();
+
+                    EditorGUIUtility.hotControl = 0;
+                    EditorGUIUtility.ExitGUI();
                 }
             }
             EditorGUI.EndDisabledGroup();
@@ -350,16 +459,15 @@ namespace RenderDocPlugins
         /// <returns></returns>
         public VertexAttributeMappingPreset GetCurrentVertexAttributeMappingPreset()
         {
-            if(m_VertexAttrList.Count > 0)
+            if (m_VertexAttrList.Count > 0)
             {
-                VertexAttributeMappingPreset preset = new VertexAttributeMappingPreset();
+                VertexAttributeMappingPreset preset = new();
                 for (int i = 0; i < m_VertexAttrList.Count; ++i)
                 {
-                    var data = new VertexAttributeMappingData();
-                    data.m_Enable = !m_VertexAttrList[i].Ignore;
-                    data.m_VertexAttributeName = m_VertexAttrList[i].CSVName;
-                    data.m_Attr = m_VertexAttrList[i].Attr;
-
+                    var data = new VertexAttributeMappingData
+                    {
+                        Mapping = m_VertexAttrList[i].Mapping
+                    };
                     preset.m_Datas.Add(data);
                 }
                 return preset;
@@ -374,24 +482,21 @@ namespace RenderDocPlugins
                 return;
             }
 
-            for(int i = 0; i < m_VertexAttrList.Count; ++i)
+            for (int i = 0; i < m_VertexAttrList.Count; ++i)
             {
-                var name = m_VertexAttrList[i].CSVName;
+                var name = m_VertexAttrList[i].Mapping.Name;
                 var data = preset.GetData(name);
-                if(data != null)
+                if (data != null)
                 {
-                    var newData = m_VertexAttrList[i];
-                    newData.Ignore = !data.m_Enable;
-                    newData.Attr = data.m_Attr;
-                    m_VertexAttrList[i] = newData;
+                    m_VertexAttrList[i].Mapping = data.Mapping;
                 }
             }
         }
 
         void DoPresetsDropDown()
         {
-            var rect = GUILayoutUtility.GetRect(Styles.PresetContent, Styles.dropdown);
-            if (EditorGUI.DropdownButton(rect, Styles.PresetContent, FocusType.Passive, Styles.dropdown))
+            var rect = GUILayoutUtility.GetRect(Texts.PresetContent, Styles.dropdown);
+            if (EditorGUI.DropdownButton(rect, Texts.PresetContent, FocusType.Passive, Styles.dropdown))
             {
                 if (PresetWindow.ShowAtPosition(rect))
                 {
@@ -403,7 +508,7 @@ namespace RenderDocPlugins
 
         #endregion
 
-        private void HandleDragAndDropGUI(Rect dragdropArea, int index)
+        private void HandleSourceDragAndDropGUI(Rect dragdropArea, int index)
         {
             Event evt = Event.current;
             switch (evt.type)
@@ -448,6 +553,44 @@ namespace RenderDocPlugins
             }
         }
 
+        private void HandleDestDragAndDropGUI(Rect dragdropArea)
+        {
+            Event evt = Event.current;
+            switch (evt.type)
+            {
+                case EventType.DragUpdated:
+                case EventType.DragPerform:
+                    if (!dragdropArea.Contains(evt.mousePosition))
+                    {
+                        return;
+                    }
+
+                    if (DragAndDrop.paths != null && DragAndDrop.paths.Length > 0)
+                    {
+                        var path = DragAndDrop.paths[0];
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            DragAndDrop.visualMode = DragAndDropVisualMode.Generic;
+                        }
+                    }
+
+                    if (evt.type == EventType.DragPerform)
+                    {
+                        DragAndDrop.AcceptDrag();
+
+                        if (DragAndDrop.paths != null && DragAndDrop.paths.Length > 0)
+                        {
+                            var path = DragAndDrop.paths[0];
+                            if (!string.IsNullOrEmpty(path))
+                            {
+                                DoChangeDestMesh(path);
+                            }
+                        }
+                    }
+                    break;
+            }
+        }
+
         private bool IsValidCSVFile(string path)
         {
             System.IO.FileAttributes attr = System.IO.File.GetAttributes(path);
@@ -461,17 +604,18 @@ namespace RenderDocPlugins
             return false;
         }
 
-        private bool IsExistSourceCSV()
-        {
-            if(m_SourcePath.Length > 0)
-            {
-                if (!string.IsNullOrEmpty(m_SourcePath[0]))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
+        // not use
+        //private bool IsExistSourceCSV()
+        //{
+        //    if (m_SourcePath.Length > 0)
+        //    {
+        //        if (!string.IsNullOrEmpty(m_SourcePath[0]))
+        //        {
+        //            return true;
+        //        }
+        //    }
+        //    return false;
+        //}
 
         private void DoChangeSourceCSV(int index, string fileFullPath)
         {
@@ -486,15 +630,18 @@ namespace RenderDocPlugins
                     m_VertexAttrList.Clear();
                     if (!string.IsNullOrEmpty(m_SourcePath[index]))
                     {
-                        List<string> headerList = new List<string>();
-                        List<int> compCountList = new List<int>();
+                        List<string> headerList = new();
+                        List<int> compCountList = new();
                         RenderDocCSV.GetMeshCSVVertexAttrList(m_SourcePath[index], headerList, compCountList);
                         for (int i = 0; i < headerList.Count; ++i)
                         {
                             var attr = new VertexAttrSetting();
-                            attr.CSVName = headerList[i];
+                            ref var mappingData = ref attr.Mapping;
+                            mappingData.Enable = true;
+                            mappingData.Name = headerList[i];
                             attr.CompCount = compCountList[i];
-                            RenderDocCSV.SpeculateVertextAttr(headerList[i], out attr.Attr);
+                            RenderDocCSV.SpeculateVertextAttr(headerList[i], out mappingData.Attr);
+                            mappingData.ResetModify();
                             m_VertexAttrList.Add(attr);
                         }
                     }
@@ -504,11 +651,11 @@ namespace RenderDocPlugins
 
         private bool DoCheckVertexAttributeRepeat()
         {
-            HashSet<VertexAttribute> set = new HashSet<VertexAttribute>();
+            HashSet<VertexAttribute> set = new();
             for (int i = 0; i < m_VertexAttrList.Count; ++i)
             {
-                var data = m_VertexAttrList[i];
-                if (!data.Ignore)
+                ref var data = ref m_VertexAttrList[i].Mapping;
+                if (data.Enable)
                 {
                     if (set.Contains(data.Attr))
                     {
@@ -542,19 +689,13 @@ namespace RenderDocPlugins
                 return;
             }
 
-            var setting = new CSVToMeshGenerator.GenSetting();
-            setting.flags = CSVToMeshGenerator.Flags.None;
+            var setting = new CSVToMeshGenerator.GenSetting
+            {
+                flags = CSVToMeshGenerator.Flags.None
+            };
             if (m_FlipVertexWindingOrder)
             {
                 setting.flags |= CSVToMeshGenerator.Flags.FlipVertexWindingOrder;
-            }
-            if (m_AutoCalcNormalIfNotExist)
-            {
-                setting.flags |= CSVToMeshGenerator.Flags.AutoCalcNormalIfNotExist;
-            }
-            if (m_AutoCalcTangentIfNotExist)
-            {
-                setting.flags |= CSVToMeshGenerator.Flags.AutoCalcTangentIfNotExist;
             }
             if (m_OptimizesRendering)
             {
@@ -564,15 +705,13 @@ namespace RenderDocPlugins
             {
                 setting.flags |= CSVToMeshGenerator.Flags.ReadWriteEnable;
             }
+            setting.calcNormal = m_AutoCalcNormal;
+            setting.calcTangent = m_AutoCalcTangent;
             setting.compression = m_MeshCompression;
-            setting.vertexAttrMapping = new CSVToMeshGenerator.VertexAttributeMapping[m_VertexAttrList.Count];
+            setting.vertexAttrMapping = new VertexAttributeMapping[m_VertexAttrList.Count];
             for (int i = 0; i < m_VertexAttrList.Count; ++i)
             {
-                var mapping = new CSVToMeshGenerator.VertexAttributeMapping();
-                mapping.Disable = m_VertexAttrList[i].Ignore;
-                mapping.Name = m_VertexAttrList[i].CSVName;
-                mapping.Attr = m_VertexAttrList[i].Attr;
-                setting.vertexAttrMapping[i] = mapping;
+                setting.vertexAttrMapping[i] = m_VertexAttrList[i].Mapping;
             }
 
             CSVToMeshGenerator.GenerateMesh(m_SourcePath, m_SubMeshCount, m_DestPath, setting, Allocator.Temp);
@@ -659,12 +798,12 @@ namespace RenderDocPlugins
             float targetHeight = position.height - EditorStyles.helpBox.margin.vertical /*- 20*/;
 
             // See if we can fit horizontally. If not, rescale down.
-            GUIStyle scaledNotificationText = EditorStyles.helpBox;
+            //GUIStyle scaledNotificationText = EditorStyles.helpBox;
             if (targetWidth < m_MessageNotificationSize.x)
             {
                 float scale = targetWidth / m_MessageNotificationSize.x;
 
-                scaledNotificationText = new GUIStyle(EditorStyles.helpBox);
+                GUIStyle scaledNotificationText = new(EditorStyles.helpBox);
                 scaledNotificationText.fontSize = Mathf.FloorToInt(scaledNotificationText.font.fontSize * scale);
 
                 warningSize = scaledNotificationText.CalcSize(m_MessageNotification);
@@ -673,14 +812,18 @@ namespace RenderDocPlugins
             warningSize.x += 1; //we'll give the text a little room to breathe to avoid word-wrapping issues with drop shadows
 
             if (warningSize.y > targetHeight)
+            {
                 warningSize.y = targetHeight;
+            }
 
-            Rect r = new Rect((position.width - warningSize.x) * .5f, 20 + (position.height - 20 - warningSize.y) * .7f, warningSize.x, warningSize.y);
+            Rect r = new((position.width - warningSize.x) * .5f, 20 + (position.height - 20 - warningSize.y) * .7f, warningSize.x, warningSize.y);
 
             double time = EditorApplication.timeSinceStartup;
             var oldColor = GUI.color;
             if (time > m_MessageFadeoutTime)
-                GUI.color = new Color(1, 1, 1, 1 - (float)((time - m_MessageFadeoutTime) / kWarningFadeoutTime));
+            {
+                GUI.color = new UnityEngine.Color(1.0f, 1.0f, 1.0f, 1.0f - (float)((time - m_MessageFadeoutTime) / kWarningFadeoutTime));
+            }
             GUI.Label(r, m_MessageNotification, EditorStyles.helpBox);
             GUI.color = oldColor;
         }

@@ -74,7 +74,7 @@ namespace RenderDocPlugins
         private static long s_LastClosedTime;
         private static Styles s_Styles;
 
-        private readonly List<string> m_PresetNames = new List<string>();
+        private readonly List<string> m_PresetNames = new();
 
         private float m_ContentHeight;
         private Vector2 m_ScrollPosition;
@@ -111,14 +111,13 @@ namespace RenderDocPlugins
 
         private void Init(Rect buttonRect)
         {
-            if (s_Styles == null)
-                s_Styles = new Styles();
+            s_Styles ??= new Styles();
 
             // Has to be done before calling Show / ShowWithMode
             buttonRect = GUIUtility.GUIToScreenRect(buttonRect);
 
             m_PresetNames.Clear();
-            VertexAttributeMapping.GetAllPresetNames(m_PresetNames);
+            VertexAttributeMappingPresetManager.GetAllPresetNames(m_PresetNames);
 
             var toggleSize = s_Styles.statusIcon.CalcSize(s_Styles.trash);
             float widthMax = 0.0f;
@@ -156,8 +155,7 @@ namespace RenderDocPlugins
             if (Event.current.type == EventType.Layout)
                 return;
 
-            if (s_Styles == null)
-                s_Styles = new Styles();
+            s_Styles ??= new Styles();
 
             var scrollViewRect = new Rect(kFrameWidth, kFrameWidth, position.width - 2 * kFrameWidth, position.height - 2 * kFrameWidth);
             var contentRect = new Rect(0, 0, 1, m_ContentHeight);
@@ -246,23 +244,21 @@ namespace RenderDocPlugins
             if (GUI.Button(drawPos, s_Styles.revealSavePreset, s_Styles.menuItem))
             {
                 Close();
-                EditorUtility.RevealInFinder(VertexAttributeMapping.preferencesPath);
+                EditorUtility.RevealInFinder(VertexAttributeMappingPresetManager.PreferencesPath);
                 GUIUtility.ExitGUI();
             }
         }
 
         void DoOnePreset(Rect rect, int index, ref bool even)
         {
-            bool apply;
-            bool removeChanged;
             var presetName = m_PresetNames[index];
-            DoPresetEntry(rect, presetName, even, out apply, out removeChanged);
+            DoPresetEntry(rect, presetName, even, out bool apply, out bool removeChanged);
             if (apply)
             {
                 Close();
                 if(MeshImporterWindow.Instance != null)
                 {
-                    MeshImporterWindow.Instance.ApplyVertexAttributeMappingPreset(VertexAttributeMapping.ReadPreset(presetName));
+                    MeshImporterWindow.Instance.ApplyVertexAttributeMappingPreset(VertexAttributeMappingPresetManager.ReadPreset(presetName));
                 }
                 GUIUtility.ExitGUI();
             }
@@ -270,7 +266,7 @@ namespace RenderDocPlugins
             {
                 if (EditorUtility.DisplayDialog("Delete Preset", $"Do you want to delete preset \"{presetName}\"", "Yes", "No"))
                 {
-                    VertexAttributeMapping.DeletePreset(presetName);
+                    VertexAttributeMappingPresetManager.DeletePreset(presetName);
                 }
                 Close();
                 GUIUtility.ExitGUI();

@@ -15,9 +15,9 @@ namespace RenderDocPlugins
         const int k_Height = 48;
         const int k_HelpBoxHeight = 40;
 
-        static readonly System.Collections.ObjectModel.ReadOnlyCollection<char> k_InvalidChars = new System.Collections.ObjectModel.ReadOnlyCollection<char>(System.IO.Path.GetInvalidFileNameChars());
-        static System.Text.StringBuilder s_CurrentInvalidChars = new System.Text.StringBuilder(k_InvalidChars.Count);
-        static string s_InvalidCharsFormatString = L10n.Tr("Invalid characters: {0}");
+        static readonly System.Collections.ObjectModel.ReadOnlyCollection<char> k_InvalidChars = new(System.IO.Path.GetInvalidFileNameChars());
+        static readonly System.Text.StringBuilder s_CurrentInvalidChars = new(k_InvalidChars.Count);
+        static readonly string s_InvalidCharsFormatString = L10n.Tr("Invalid characters: {0}");
         static string s_TargetName = string.Empty;
         static VertexAttributeMappingPreset s_TargetPreset;
 
@@ -109,7 +109,7 @@ namespace RenderDocPlugins
             {
                 Close();
 
-                VertexAttributeMapping.SavePreset(s_TargetPreset, s_TargetName);
+                VertexAttributeMappingPresetManager.SavePreset(s_TargetPreset, s_TargetName);
                 GUIUtility.ExitGUI();
             }
             else

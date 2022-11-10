@@ -10,25 +10,13 @@ namespace RenderDocPlugins
     {
         private static int GetByteSize(VertexAttributeFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case VertexAttributeFormat.Float32:
-                case VertexAttributeFormat.UInt32:
-                case VertexAttributeFormat.SInt32:
-                    return 4;
-                case VertexAttributeFormat.Float16:
-                case VertexAttributeFormat.UNorm16:
-                case VertexAttributeFormat.SNorm16:
-                case VertexAttributeFormat.UInt16:
-                case VertexAttributeFormat.SInt16:
-                    return 2;
-                case VertexAttributeFormat.UNorm8:
-                case VertexAttributeFormat.SNorm8:
-                case VertexAttributeFormat.UInt8:
-                case VertexAttributeFormat.SInt8:
-                    return 1;
-            }
-            throw new System.IndexOutOfRangeException();
+                VertexAttributeFormat.Float32 or VertexAttributeFormat.UInt32 or VertexAttributeFormat.SInt32 => 4,
+                VertexAttributeFormat.Float16 or VertexAttributeFormat.UNorm16 or VertexAttributeFormat.SNorm16 or VertexAttributeFormat.UInt16 or VertexAttributeFormat.SInt16 => 2,
+                VertexAttributeFormat.UNorm8 or VertexAttributeFormat.SNorm8 or VertexAttributeFormat.UInt8 or VertexAttributeFormat.SInt8 => 1,
+                _ => throw new System.IndexOutOfRangeException(),
+            };
         }
 
         private static int GetByteSize(VertexAttributeFormat format, int dimension)

@@ -11,26 +11,20 @@ namespace RenderDocPlugins
     public class VertexAttributeMappingData
     {
         [SerializeField]
-        public bool m_Enable;
-
-        [SerializeField]
-        public string m_VertexAttributeName;
-
-        [SerializeField]
-        public UnityEngine.Rendering.VertexAttribute m_Attr;
+        public VertexAttributeMapping Mapping;
     }
 
     [System.Serializable]
     public class VertexAttributeMappingPreset
     {
         [SerializeField]
-        public List<VertexAttributeMappingData> m_Datas = new List<VertexAttributeMappingData>();
+        public List<VertexAttributeMappingData> m_Datas = new();
 
         public VertexAttributeMappingData GetData(string attrName)
         {
             for(int i = 0; i < m_Datas.Count; ++i)
             {
-                if(string.Equals(m_Datas[i].m_VertexAttributeName, attrName, System.StringComparison.Ordinal))
+                if(string.Equals(m_Datas[i].Mapping.Name, attrName, System.StringComparison.Ordinal))
                 {
                     return m_Datas[i];
                 }
@@ -39,18 +33,18 @@ namespace RenderDocPlugins
         }
     }
 
-    public class VertexAttributeMapping
+    public class VertexAttributeMappingPresetManager
     {
         private const string k_PresetExt = ".vam";
         private const string k_PresetPath = "VertexAttrMappingPreset";
 
-        internal static string preferencesPath => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(InternalEditorUtility.GetAssetsFolder()), k_PresetPath);
+        internal static string PreferencesPath => System.IO.Path.Combine(System.IO.Path.GetDirectoryName(InternalEditorUtility.GetAssetsFolder()), k_PresetPath);
 
         public static void GetAllPresetNames(List<string> list)
         {
-            if (System.IO.Directory.Exists(preferencesPath))
+            if (System.IO.Directory.Exists(PreferencesPath))
             {
-                var presetPaths = System.IO.Directory.GetFiles(preferencesPath).Where(path => path.EndsWith(k_PresetExt)).ToArray();
+                var presetPaths = System.IO.Directory.GetFiles(PreferencesPath).Where(path => path.EndsWith(k_PresetExt)).ToArray();
                 foreach (var presetPath in presetPaths)
                 {
                     var name = System.IO.Path.GetFileNameWithoutExtension(presetPath);
@@ -61,18 +55,18 @@ namespace RenderDocPlugins
 
         public static string GetPresetFullPath(string name)
         {
-            return System.IO.Path.Combine(preferencesPath, name + k_PresetExt);
+            return System.IO.Path.Combine(PreferencesPath, name + k_PresetExt);
         }
 
         public static VertexAttributeMappingPreset ReadPreset(string name)
         {
-            string path = VertexAttributeMapping.GetPresetFullPath(name);
+            string path = GetPresetFullPath(name);
             if(System.IO.File.Exists(path))
             {
                 var json = System.IO.File.ReadAllText(path);
                 if(!string.IsNullOrEmpty(json))
                 {
-                    VertexAttributeMappingPreset preset = new VertexAttributeMappingPreset();
+                    VertexAttributeMappingPreset preset = new();
                     EditorJsonUtility.FromJsonOverwrite(json, preset);
                     return preset;
                 }
@@ -99,12 +93,12 @@ namespace RenderDocPlugins
             {
                 return;
             }
-            if (!System.IO.Directory.Exists(VertexAttributeMapping.preferencesPath))
+            if (!System.IO.Directory.Exists(VertexAttributeMappingPresetManager.PreferencesPath))
             {
-                System.IO.Directory.CreateDirectory(VertexAttributeMapping.preferencesPath);
+                System.IO.Directory.CreateDirectory(VertexAttributeMappingPresetManager.PreferencesPath);
             }
 
-            string path = VertexAttributeMapping.GetPresetFullPath(name);
+            string path = VertexAttributeMappingPresetManager.GetPresetFullPath(name);
 
             var json = EditorJsonUtility.ToJson(preset, true);
             System.IO.File.WriteAllText(path, json);

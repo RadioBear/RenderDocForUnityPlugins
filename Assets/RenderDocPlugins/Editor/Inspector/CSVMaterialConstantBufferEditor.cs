@@ -10,10 +10,12 @@ namespace RenderDocPlugins
     public class CSVMaterialConstantBufferEditor : Editor
     {
         private static bool s_FoldoutDataList;
+        private static bool s_ModifyMode = false;
         private Vector2 m_ScrollPos;
 
         private void OnEnable()
         {
+            
         }
 
         public override void OnInspectorGUI()
@@ -24,13 +26,17 @@ namespace RenderDocPlugins
             var buffer = obj.Buffer;
             if(buffer != null && buffer.IsValid())
             {
-                EditorGUILayout.LabelField($"Buffer is set. Count: {buffer.count} Byte: {buffer.count * buffer.stride}B");
+                EditorGUILayout.LabelField($"Buffer is set to renderer. Count: {buffer.count} Byte: {buffer.count * buffer.stride}B");
 
                 unsafe
                 {
                     var count = buffer.count / 4;
                     var arrayData = new Vector4[count];
+                    bool modify = false;
                     buffer.GetData(arrayData);
+
+                    s_ModifyMode = EditorGUILayout.ToggleLeft("Modify Mode", s_ModifyMode);
+
                     s_FoldoutDataList = EditorGUILayout.Foldout(s_FoldoutDataList, "Data List:", true);
                     if (s_FoldoutDataList)
                     {
@@ -40,29 +46,46 @@ namespace RenderDocPlugins
                             {
                                 EditorGUILayout.BeginHorizontal();
                                 GUILayout.Label($"[{i}]", GUILayout.ExpandWidth(false));
-                                EditorGUILayout.LabelField($"{arrayData[i].x},{arrayData[i].y},{arrayData[i].z},{arrayData[i].w}");
-                                if (arrayData[i].x >= 0.0f && arrayData[i].x <= 1.0f &&
-                                    arrayData[i].y >= 0.0f && arrayData[i].y <= 1.0f &&
-                                    arrayData[i].z >= 0.0f && arrayData[i].z <= 1.0f &&
-                                    arrayData[i].w >= 0.0f && arrayData[i].w <= 1.0f)
+                                if (s_ModifyMode)
                                 {
-                                    if (GUILayout.Button("Color(Hex)"))
+                                    var newValue = EditorGUILayout.Vector4Field(GUIContent.none, arrayData[i]);
+                                    if(newValue != arrayData[i])
                                     {
-                                        Color c = arrayData[i];
-                                        EditorGUIUtility.systemCopyBuffer = ColorUtility.ToHtmlStringRGB(c);
+                                        arrayData[i] = newValue;
+                                        modify = true;
                                     }
                                 }
                                 else
                                 {
-                                    if (GUILayout.Button("Copy"))
+                                    EditorGUILayout.LabelField($"{arrayData[i].x},{arrayData[i].y},{arrayData[i].z},{arrayData[i].w}");
+                                    if (arrayData[i].x >= 0.0f && arrayData[i].x <= 1.0f &&
+                                        arrayData[i].y >= 0.0f && arrayData[i].y <= 1.0f &&
+                                        arrayData[i].z >= 0.0f && arrayData[i].z <= 1.0f &&
+                                        arrayData[i].w >= 0.0f && arrayData[i].w <= 1.0f)
                                     {
-                                        EditorGUIUtility.systemCopyBuffer = $"{arrayData[i].x},{arrayData[i].y},{arrayData[i].z},{arrayData[i].w}";
+                                        if (GUILayout.Button("Color(Hex)"))
+                                        {
+                                            Color c = arrayData[i];
+                                            EditorGUIUtility.systemCopyBuffer = ColorUtility.ToHtmlStringRGB(c);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (GUILayout.Button("Copy"))
+                                        {
+                                            EditorGUIUtility.systemCopyBuffer = $"{arrayData[i].x},{arrayData[i].y},{arrayData[i].z},{arrayData[i].w}";
+                                        }
                                     }
                                 }
                                 EditorGUILayout.EndHorizontal();
                             }
                         }
                         EditorGUILayout.EndScrollView();
+                    }
+
+                    if(modify)
+                    {
+                        buffer.SetData(arrayData);
                     }
                 }
             }

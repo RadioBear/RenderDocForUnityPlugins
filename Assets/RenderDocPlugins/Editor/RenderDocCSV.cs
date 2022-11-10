@@ -234,6 +234,8 @@ namespace RenderDocPlugins
             {
                 return 3;
             }
+            // support new componet text
+            UnityEngine.Debug.LogError($"Not support: {compStr}");
             return -1;
         }
 
