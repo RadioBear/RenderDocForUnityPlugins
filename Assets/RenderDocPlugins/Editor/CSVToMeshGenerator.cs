@@ -6,12 +6,11 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEditor;
 using System;
-using System.Windows.Markup;
 using System.Security.Policy;
-using static UnityEditor.PlayerSettings;
 
 namespace RenderDocPlugins
 {
+
     [System.Serializable]
     public struct VertexAttributeMapping
     {
@@ -20,8 +19,8 @@ namespace RenderDocPlugins
             Nothing,
             Negation,
         }
-        public const int ComponentCount = 4;
-        public static readonly string[] ComponentName = new string[]
+        public const int k_ComponentCount = 4;
+        public static readonly string[] k_ComponentName = new string[]
         {
             "X",
             "Y",
@@ -156,6 +155,46 @@ namespace RenderDocPlugins
                 return val;
             }
         }
+
+        public struct ModifyDataPreset
+        {
+            public ModifyData ComponentX;
+            public ModifyData ComponentY;
+            public ModifyData ComponentZ;
+            public ModifyData ComponentW;
+        }
+
+        public static readonly GUIContent[] k_ModifyDataPresetName = new GUIContent[]
+        {
+            new GUIContent("DirectX <=> OpenGL"),
+        };
+        public readonly static ModifyDataPreset[] k_ModifyDataPreset =
+        {
+            new ModifyDataPreset
+            {
+                ComponentX = 
+                {
+                    Swizzle = Swizzle.Z,
+                    Manipulation = Manipulation.Negation,
+                },
+                ComponentY =
+                {
+                    Swizzle = Swizzle.X,
+                    Manipulation = Manipulation.Negation,
+                },
+                ComponentZ =
+                {
+                    Swizzle = Swizzle.Y,
+                    Manipulation = Manipulation.Nothing,
+                },
+                ComponentW =
+                {
+                    Swizzle = Swizzle.W,
+                    Manipulation = Manipulation.Nothing,
+                },
+            },
+        };
+
         [SerializeField]
         public string Name;
         [SerializeField]
@@ -191,6 +230,14 @@ namespace RenderDocPlugins
             ModifyComponentY.Swizzle = Swizzle.Y;
             ModifyComponentZ.Swizzle = Swizzle.Z;
             ModifyComponentW.Swizzle = Swizzle.W;
+        }
+
+        public void ApplyModifyPreset(in ModifyDataPreset preset)
+        {
+            ModifyComponentX = preset.ComponentX;
+            ModifyComponentY = preset.ComponentY;
+            ModifyComponentZ = preset.ComponentZ;
+            ModifyComponentW = preset.ComponentW;
         }
 
         public ModifyData GetModifyData(int index)

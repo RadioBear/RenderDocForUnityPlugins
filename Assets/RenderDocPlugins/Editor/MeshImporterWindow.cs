@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
 using UnityEditor;
+using static RenderDocPlugins.VertexAttributeMapping;
 
 namespace RenderDocPlugins
 {
@@ -29,7 +30,8 @@ namespace RenderDocPlugins
 
         static class Styles
         {
-            public static readonly GUIStyle dropdown = "Dropdown";
+            public static readonly GUIStyle Dropdown = "Dropdown";
+            public static readonly GUIStyle DropdownSmall = "ExposablePopupMenu";
             public static readonly GUIContent TitleIcon = EditorGUIUtility.IconContent("d_P4_Local");
 
 
@@ -337,13 +339,13 @@ namespace RenderDocPlugins
                                             const float k_Space = 10f;
 
                                             EditorGUILayout.BeginHorizontal();
-                                            GUIHelper.LayoutTitleDot(EditorStyles.miniBoldLabel);
+                                            GUIHelper.LayoutTitleDot(EditorStyles.miniBoldLabel, GUILayout.Width(5f));
                                             GUILayout.Label("Modify", EditorStyles.miniBoldLabel);
                                             GUILayout.FlexibleSpace();
                                             EditorGUILayout.EndHorizontal();
 
                                             EditorGUILayout.BeginHorizontal();
-                                            GUILayout.Space(20f);
+                                            GUILayout.Space(15f);
                                             EditorGUILayout.BeginVertical();
                                             EditorGUILayout.BeginHorizontal();
                                             {
@@ -351,9 +353,9 @@ namespace RenderDocPlugins
                                                 {
                                                     GUILayout.Label("Comp.", EditorStyles.miniBoldLabel);
                                                     GUIHelper.LayoutLineHorizontal(1, 0.5f);
-                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.k_ComponentCount; ++componentIndex)
                                                     {
-                                                        GUILayout.Label($"[{VertexAttributeMapping.ComponentName[componentIndex]}]");
+                                                        GUILayout.Label($"[{VertexAttributeMapping.k_ComponentName[componentIndex]}]");
                                                     }
                                                 }
                                                 EditorGUILayout.EndVertical();
@@ -366,7 +368,7 @@ namespace RenderDocPlugins
                                                 {
                                                     GUILayout.Label("Swizzle", EditorStyles.miniBoldLabel);
                                                     GUIHelper.LayoutLineHorizontal(1, 0.5f);
-                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.k_ComponentCount; ++componentIndex)
                                                     {
                                                         ref var modifyData = ref VertexAttributeMapping.GetModifyData(ref mappingData, componentIndex);
                                                         var newSwizzle = GUIHelper.LayoutEnumPopup(GUIContent.none, modifyData.Swizzle, GUILayout.ExpandWidth(false));
@@ -385,7 +387,7 @@ namespace RenderDocPlugins
                                                     GUILayout.Label("Operation", EditorStyles.miniBoldLabel);
                                                     GUIHelper.LayoutLineHorizontal(1, 0.5f);
 
-                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.ComponentCount; ++componentIndex)
+                                                    for (int componentIndex = 0; componentIndex < VertexAttributeMapping.k_ComponentCount; ++componentIndex)
                                                     {
                                                         ref var modifyData = ref VertexAttributeMapping.GetModifyData(ref mappingData, componentIndex);
                                                         var newManipulation = GUIHelper.LayoutEnumPopup(GUIContent.none, modifyData.Manipulation, GUILayout.ExpandWidth(false));
@@ -397,6 +399,29 @@ namespace RenderDocPlugins
                                                 }
                                                 EditorGUILayout.EndVertical();
 
+                                                GUILayout.Space(k_Space);
+
+                                                EditorGUILayout.BeginVertical(GUILayout.Width(0));
+                                                {
+                                                    GUILayout.Label("Preset", EditorStyles.miniBoldLabel);
+                                                    GUIHelper.LayoutLineHorizontal(1, 0.5f);
+
+                                                    if (EditorGUILayout.DropdownButton(new GUIContent("Preset"), FocusType.Passive, EditorStyles.miniPullDown))
+                                                    {
+                                                        var rect = GUIHelper.Reflection.GUILayoutUtility.topLevel.GetLast();
+                                                        EditorUtility.DisplayCustomMenu(rect, VertexAttributeMapping.k_ModifyDataPresetName, -1, (object userData, string[] options, int selected) =>
+                                                        {
+                                                            var setting = userData as VertexAttrSetting;
+                                                            ref var mappingData = ref setting.Mapping;
+                                                            mappingData.ApplyModifyPreset(VertexAttributeMapping.k_ModifyDataPreset[selected]);
+
+                                                        }, data);
+
+                                                        EditorGUIUtility.hotControl = 0;
+                                                        EditorGUIUtility.ExitGUI();
+                                                    }
+                                                }
+                                                EditorGUILayout.EndVertical();
                                             }
                                             EditorGUILayout.EndHorizontal();
                                             GUIHelper.LayoutLineHorizontal(1.0f, 0.8f);
@@ -495,8 +520,8 @@ namespace RenderDocPlugins
 
         void DoPresetsDropDown()
         {
-            var rect = GUILayoutUtility.GetRect(Texts.PresetContent, Styles.dropdown);
-            if (EditorGUI.DropdownButton(rect, Texts.PresetContent, FocusType.Passive, Styles.dropdown))
+            var rect = GUILayoutUtility.GetRect(Texts.PresetContent, Styles.Dropdown);
+            if (EditorGUI.DropdownButton(rect, Texts.PresetContent, FocusType.Passive, Styles.Dropdown))
             {
                 if (PresetWindow.ShowAtPosition(rect))
                 {
