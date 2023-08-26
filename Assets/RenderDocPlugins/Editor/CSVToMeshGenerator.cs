@@ -854,6 +854,10 @@ namespace RenderDocPlugins
 
             public NativeArray<VertexAttributeDescriptor> GetVertexAttributes(Allocator allocator)
             {
+                // For a mesh to be compatible with a SkinnedMeshRenderer, it must have multiple vertex streams: one for deformed data (positions, normals, tangents), one for static data (colors and texture coordinates), and one for skinning data (blend weights and blend indices).
+                // Within each stream, attributes of a vertex are laid out one after another, in this order:
+                // VertexAttribute.Position, VertexAttribute.Normal, VertexAttribute.Tangent, VertexAttribute.Color, VertexAttribute.TexCoord0, ..., VertexAttribute.TexCoord7, VertexAttribute.BlendWeight, VertexAttribute.BlendIndices.
+                // Not all format and dimension combinations are valid. Specifically, the data size of a vertex attribute must be a multiple of 4 bytes.For example, a VertexAttributeFormat.Float16 format with dimension 3 is not valid.See Also: SystemInfo.SupportsVertexAttributeFormat.
                 int count = 0;
                 if (Pos.IsValidAllComponent()) { ++count; }
                 if (Normal.IsValidAllComponent()) { ++count; }
@@ -871,78 +875,91 @@ namespace RenderDocPlugins
                 if (BlendIndices.IsValidAllComponent()) { ++count; }
 
                 NativeArray<VertexAttributeDescriptor> array = new(count, allocator);
-                count = 0;
+                int index = 0;
+                int stream = 0;
+                int beginIndex = index;
                 if (Pos.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.Position,
                         VertexAttributeFormat.Float32,
                         3,
-                        0
+                        stream
                         );
-                    ++count;
+                    ++index;
                 }
                 if (Normal.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.Normal,
                         VertexAttributeFormat.Float32,
                         3,
-                        0
+                        stream
                         );
-                    ++count;
+                    ++index;
                 }
                 if (Tangent.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.Tangent,
                         VertexAttributeFormat.Float32,
                         4,
-                        0
+                        stream
                         );
-                    ++count;
+                    ++index;
                 }
+
+                if (beginIndex != index)
+                {
+                    ++stream;
+                }
+                beginIndex = index;
                 if (Color.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.Color,
                         VertexAttributeFormat.Float32,
                         4,
-                        0
+                        stream
                         );
-                    ++count;
+                    ++index;
                 }
                 for (int i = 0; i < Texcoord.Length; ++i)
                 {
                     var len = Texcoord[i].GetValidComponentLength();
                     if (len > 0)
                     {
-                        array[count] = new VertexAttributeDescriptor(
+                        array[index] = new VertexAttributeDescriptor(
                         GetTexcoordAttribute(i),
                         VertexAttributeFormat.Float32,
                         len,
-                        0
+                        stream
                         );
-                        ++count;
+                        ++index;
                     }
+                }
+
+                if (beginIndex != index)
+                {
+                    ++stream;
                 }
                 if (BlendWeight.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.BlendWeight,
                         VertexAttributeFormat.Float32,
                         4,
-                        0
+                        stream
                         );
-                    ++count;
+                    ++index;
                 }
                 if (BlendIndices.IsValidAllComponent())
                 {
-                    array[count] = new VertexAttributeDescriptor(
+                    array[index] = new VertexAttributeDescriptor(
                         VertexAttribute.BlendIndices,
                         VertexAttributeFormat.SInt32,
                         4,
-                        0
+                        stream
                         );
                 }
                 return array;
@@ -1081,9 +1098,9 @@ namespace RenderDocPlugins
             private int vertexDataSetCount;
             private NativeArray<byte> indexDataSet;
             private int indexDataSetCount;
-            private readonly int offsetMappingBase;
-            private NativeArray<int> offsetMapping;
-            private readonly int oneVertexDataTotalSize;
+            //private readonly int offsetMappingBase;
+            //private NativeArray<int>[] offsetMapping;
+            //private readonly int oneVertexDataTotalSize;
 
             public VertexDataList(NativeArray<VertexAttributeDescriptor> vertexDesc, int vertexCount, int indexCount, int vertexIndexBase, Allocator allocator)
             {
@@ -1098,38 +1115,38 @@ namespace RenderDocPlugins
                 vertexDataSetCount = 0;
                 indexDataSet = new NativeArray<byte>(indexCount, allocator, NativeArrayOptions.ClearMemory);
                 indexDataSetCount = 0;
-                {
-                    int minIndex = 0;
-                    int maxIndex = 0;
-                    var enumArray = System.Enum.GetValues(typeof(VertexAttribute)) as int[];
-                    for (int i = 0; i < enumArray.Length; ++i)
-                    {
-                        minIndex = Mathf.Min(enumArray[i], minIndex);
-                        maxIndex = Mathf.Max(enumArray[i], maxIndex);
-                    }
-                    offsetMapping = new NativeArray<int>(maxIndex - minIndex + 1, allocator);
-                    for (int i = 0; i < offsetMapping.Length; ++i)
-                    {
-                        offsetMapping[i] = -1;
-                    }
-                    int byteOffset = 0;
-                    for (int i = 0; i < vertexDesc.Length; ++i)
-                    {
-                        var byteSize = Utils.GetVertexAttributeByteSize(vertexDesc[i]);
-                        var attrValue = (int)vertexDesc[i].attribute;
-                        offsetMapping[attrValue - minIndex] = byteOffset;
-                        byteOffset += byteSize;
-                    }
-                    this.offsetMappingBase = minIndex;
-                    this.oneVertexDataTotalSize = byteOffset;
-                }
+                //{
+                //    // calc min max VertexAttribute value
+                //    int minIndex = 0;
+                //    int maxIndex = 0;
+                //    var enumArray = System.Enum.GetValues(typeof(VertexAttribute)) as int[];
+                //    for (int i = 0; i < enumArray.Length; ++i)
+                //    {
+                //        minIndex = Mathf.Min(enumArray[i], minIndex);
+                //        maxIndex = Mathf.Max(enumArray[i], maxIndex);
+                //    }
+                //    offsetMapping = new NativeArray<int>(maxIndex - minIndex + 1, allocator);
+                //    for (int i = 0; i < offsetMapping.Length; ++i)
+                //    {
+                //        offsetMapping[i] = -1;
+                //    }
+                //    int byteOffset = 0;
+                //    for (int i = 0; i < vertexDesc.Length; ++i)
+                //    {
+                //        var byteSize = Utils.GetVertexAttributeByteSize(vertexDesc[i]);
+                //        var attrValue = (int)vertexDesc[i].attribute;
+                //        offsetMapping[attrValue - minIndex] = byteOffset;
+                //        byteOffset += byteSize;
+                //    }
+                //    this.offsetMappingBase = minIndex;
+                //    this.oneVertexDataTotalSize = byteOffset;
+                //}
                 unsafe
                 {
                     var byteArray = meshData.GetVertexData<byte>(0);
                     UnsafeUtility.MemClear(NativeArrayUnsafeUtility.GetUnsafePtr(byteArray), byteArray.Length);
                 }
 
-                UnityEngine.Assertions.Assert.IsTrue(meshData.GetVertexData<byte>(0).Length == oneVertexDataTotalSize * vertexCount);
                 UnityEngine.Assertions.Assert.IsTrue(meshData.GetIndexData<byte>().Length == ((meshData.indexFormat == IndexFormat.UInt32) ? (4 * indexCount) : (2 * indexCount)));
             }
 
@@ -1174,12 +1191,23 @@ namespace RenderDocPlugins
 
             public void SetVertexData<T>(int index, VertexAttribute attr, T data) where T : struct
             {
-                var byteOffset = offsetMapping[((int)attr) - offsetMappingBase];
-                if (byteOffset != -1)
+                var stream = meshData.GetVertexAttributeStream(attr);
+                if (stream == -1)
                 {
-                    var byteArray = meshData.GetVertexData<byte>(0);
-                    byteArray.ReinterpretStore<T>((index * oneVertexDataTotalSize) + byteOffset, data);
+                    return;
                 }
+                var byteOffset = meshData.GetVertexAttributeOffset(attr);
+                if (byteOffset == -1)
+                {
+                    return;
+                }
+                var stride = meshData.GetVertexBufferStride(stream);
+                if (stride <= 0)
+                {
+                    return;
+                }
+                var byteArray = meshData.GetVertexData<byte>(stream);
+                byteArray.ReinterpretStore<T>((index * stride) + byteOffset, data);
             }
 
             public void SetVertexIndexData(int indicesIndex, int vertexIndex)
@@ -1298,7 +1326,7 @@ namespace RenderDocPlugins
                 }
                 vertexDataSet.Dispose();
                 indexDataSet.Dispose();
-                offsetMapping.Dispose();
+                //offsetMapping.Dispose();
             }
 
         }
@@ -1434,6 +1462,7 @@ namespace RenderDocPlugins
                         vertexDataList.Dispose();
                     }
                     succeed = true;
+                    FileUtility.MakeSureAssetDirectoryExist(targetAssetPath);
                     AssetDatabase.CreateAsset(mesh, targetAssetPath);
                     AssetDatabase.ImportAsset(targetAssetPath);
                     Selection.activeObject = mesh;
